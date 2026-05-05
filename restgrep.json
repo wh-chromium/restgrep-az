@@ -1,0 +1,8 @@
+{
+  "backends": [
+    {
+      "type": "github",
+      "repo": "chromium/chromium"
+    }
+  ]
+}
