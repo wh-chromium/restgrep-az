@@ -24,3 +24,10 @@ Neither the Azure DevOps nor the GitHub search APIs return the full file content
 -   **GitHub:** Provides a small text fragment, but no positional data.
 
 If a file is not present on your local disk, `restgrep` cannot display the full, real line of code and will instead show the metadata provided by the backend (e.g., `[Match at char offset...]` for Azure). To get full `grep` parity in these cases, the file would need to be checked out locally.
+
+## 3. GitHub Search Rate Limits
+
+GitHub's Code Search API is strictly rate-limited (typically 10 requests per minute for authenticated users, or 9 per minute as observed).
+
+- **Behavior:** `restgrep` does NOT implement internal retries or backoff logic.
+- **Notification:** If the limit is exceeded, `restgrep` will exit with a non-zero status code and print the raw GitHub error (e.g., `HTTP 403: Primary rate limit exceeded`) to `stderr`. Callers should be prepared to handle these failures by implementation of their own delay or backoff strategies.
