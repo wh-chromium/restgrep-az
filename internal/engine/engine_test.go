@@ -226,7 +226,11 @@ src/base/strings/string_util.cc:10:bool EndsWith(StringPiece text, StringPiece s
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			eng := New([]backend.Backend{mockBackend}, &buf)
+			eb := EngineBackend{
+				Backend: mockBackend,
+				Limit:   tt.opts.Limit,
+			}
+			eng := New([]EngineBackend{eb}, &buf)
 
 			err := eng.Run(context.Background(), tt.query, tt.opts)
 			if err != nil {
@@ -235,9 +239,24 @@ src/base/strings/string_util.cc:10:bool EndsWith(StringPiece text, StringPiece s
 
 			actual := buf.String()
 			
-			// For count flag, order might be random because it uses a map for counts and iterates over it.
+			// Separate results from status lines
+			lines := strings.Split(strings.TrimSpace(actual), "\n")
+			var resultLines []string
+			var statusLines []string
+			for _, line := range lines {
+				if strings.HasPrefix(line, "[") && strings.Contains(line, "Showing") {
+					statusLines = append(statusLines, line)
+				} else {
+					resultLines = append(resultLines, line)
+				}
+			}
+			actualResults := strings.Join(resultLines, "\n")
+			if len(resultLines) > 0 {
+				actualResults += "\n"
+			}
+
 			if tt.opts.Count {
-				actualLines := strings.Split(strings.TrimSpace(actual), "\n")
+				actualLines := resultLines
 				expectedLines := strings.Split(strings.TrimSpace(tt.expected), "\n")
 				
 				// Ensure both have same number of lines
@@ -259,9 +278,14 @@ src/base/strings/string_util.cc:10:bool EndsWith(StringPiece text, StringPiece s
 					}
 				}
 			} else {
-				if actual != tt.expected {
-					t.Errorf("expected:\n%s\n\ngot:\n%s", tt.expected, actual)
+				if actualResults != tt.expected {
+					t.Errorf("expected:\n%s\n\ngot:\n%s", tt.expected, actualResults)
 				}
+			}
+			
+			// Verify we have at least one status line
+			if len(statusLines) == 0 {
+				t.Errorf("expected at least one status line, got none")
 			}
 		})
 	}

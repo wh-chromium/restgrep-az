@@ -78,9 +78,14 @@ func (b *Backend) Search(ctx context.Context, query string, opts backend.SearchO
 		searchText = "*" + searchText + "*"
 	}
 
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+
 	reqBody := SearchRequest{
 		SearchText: searchText,
-		Top:        100, // Hardcoded limit for now
+		Top:        limit,
 		Skip:       0,
 	}
 	if b.Project != "" {

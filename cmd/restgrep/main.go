@@ -25,6 +25,8 @@ func main() {
 	flag.BoolVar(&opts.FilesWithMatches, "files-with-matches", false, "Suppress normal output; instead print the name of each input file")
 	flag.BoolVar(&opts.WordRegexp, "w", false, "Force PATTERN to match only whole words")
 	flag.BoolVar(&opts.WordRegexp, "word-regexp", false, "Force PATTERN to match only whole words")
+	flag.IntVar(&opts.Limit, "m", 0, "Stop after NUM matches")
+	flag.IntVar(&opts.Limit, "max-count", 0, "Stop after NUM matches")
 
 	flag.Parse()
 
@@ -43,7 +45,7 @@ func main() {
 			// Provide a default config if it doesn't exist to make it easier to test
 			cfg = &config.Config{
 				Backends: []config.BackendConfig{
-					{Type: "azure", Organization: "fabrikam", Project: "MyFirstProject"},
+					{Type: "azure", Organization: "fabrikam", Project: "MyFirstProject", Limit: 100},
 				},
 			}
 		} else {
@@ -52,16 +54,26 @@ func main() {
 		}
 	}
 
-	var backends []backend.Backend
+	var backends []engine.EngineBackend
 	for _, bCfg := range cfg.Backends {
+		limit := bCfg.Limit
+		if limit <= 0 {
+			limit = 100
+		}
+		var b backend.Backend
 		switch bCfg.Type {
 		case "azure":
-			backends = append(backends, azure.New(bCfg.Organization, bCfg.Project))
+			b = azure.New(bCfg.Organization, bCfg.Project)
 		case "github":
-			backends = append(backends, github.New(bCfg.Repo))
+			b = github.New(bCfg.Repo)
 		default:
 			fmt.Fprintf(os.Stderr, "Unknown backend type: %s\n", bCfg.Type)
+			continue
 		}
+		backends = append(backends, engine.EngineBackend{
+			Backend: b,
+			Limit:   limit,
+		})
 	}
 
 	eng := engine.New(backends, os.Stdout)

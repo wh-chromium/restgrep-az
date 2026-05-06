@@ -142,7 +142,11 @@ func TestAzureSearch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			eng := engine.New([]backend.Backend{b}, &buf)
+			eb := engine.EngineBackend{
+				Backend: b,
+				Limit:   tt.opts.Limit,
+			}
+			eng := engine.New([]engine.EngineBackend{eb}, &buf)
 
 			err := eng.Run(context.Background(), tt.query, tt.opts)
 			if err != nil {
@@ -151,12 +155,25 @@ func TestAzureSearch(t *testing.T) {
 
 			actual := buf.String()
 			
+			// Separate results from status lines
+			lines := strings.Split(strings.TrimSpace(actual), "\n")
+			var resultLines []string
+			for _, line := range lines {
+				if !(strings.HasPrefix(line, "[") && strings.Contains(line, "Showing")) {
+					resultLines = append(resultLines, line)
+				}
+			}
+			actualResults := strings.Join(resultLines, "\n")
+			if len(resultLines) > 0 {
+				actualResults += "\n"
+			}
+
 			if tt.opts.Count {
-				actualLines := strings.Split(strings.TrimSpace(actual), "\n")
+				actualLines := resultLines
 				expectedLines := strings.Split(strings.TrimSpace(tt.expected), "\n")
 				
 				if len(actualLines) != len(expectedLines) {
-					t.Errorf("expected %d lines, got %d. Output:\n%s", len(expectedLines), len(actualLines), actual)
+					t.Errorf("expected %d lines, got %d. Output:\n%s", len(expectedLines), len(actualLines), actualResults)
 				}
 				
 				for _, el := range expectedLines {
@@ -168,12 +185,12 @@ func TestAzureSearch(t *testing.T) {
 						}
 					}
 					if !found {
-						t.Errorf("expected to find line %q in output:\n%s", el, actual)
+						t.Errorf("expected to find line %q in output:\n%s", el, actualResults)
 					}
 				}
 			} else {
-				if actual != tt.expected {
-					t.Errorf("expected:\n%s\n\ngot:\n%s", tt.expected, actual)
+				if actualResults != tt.expected {
+					t.Errorf("expected:\n%s\n\ngot:\n%s", tt.expected, actualResults)
 				}
 			}
 		})

@@ -16,6 +16,7 @@
 - `-l`, `--files-with-matches`: Print only the name of each input file.
 - `-c`, `--count`: Print a count of matching lines for each input file.
 - `-w`, `--word-regexp`: Force PATTERN to match only whole words.
+- `-m`, `--max-count`: Stop after NUM matches (defaults to 100 or as configured in `restgrep.json`).
 
 ## Configuration (`restgrep.json`)
 

@@ -10,6 +10,7 @@ type SearchOptions struct {
 	Count            bool
 	FilesWithMatches bool
 	WordRegexp       bool
+	Limit            int
 }
 
 type SearchResult struct {

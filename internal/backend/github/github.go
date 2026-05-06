@@ -39,7 +39,12 @@ func (b *Backend) Search(ctx context.Context, query string, opts backend.SearchO
 		q = fmt.Sprintf(`"%s"`, q)
 	}
 
-	args := []string{"search", "code", q}
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+
+	args := []string{"search", "code", q, "--limit", fmt.Sprintf("%d", limit)}
 	if b.Repo != "" {
 		args = append(args, "--repo", b.Repo)
 	}

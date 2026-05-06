@@ -10,6 +10,7 @@ type BackendConfig struct {
 	Organization string `json:"organization,omitempty"`
 	Project      string `json:"project,omitempty"`
 	Repo         string `json:"repo,omitempty"`
+	Limit        int    `json:"limit,omitempty"`
 }
 
 type Config struct {

@@ -12,12 +12,17 @@ import (
 	"github.com/restgrep-az/restgrep/internal/backend"
 )
 
+type EngineBackend struct {
+	Backend backend.Backend
+	Limit   int
+}
+
 type Engine struct {
-	backends []backend.Backend
+	backends []EngineBackend
 	out      io.Writer
 }
 
-func New(backends []backend.Backend, out io.Writer) *Engine {
+func New(backends []EngineBackend, out io.Writer) *Engine {
 	return &Engine{backends: backends, out: out}
 }
 
@@ -48,10 +53,23 @@ func getLineFromOffset(data []byte, charOffset int) (string, int) {
 }
 
 func (e *Engine) Run(ctx context.Context, query string, opts backend.SearchOptions) error {
-	for _, b := range e.backends {
-		results, err := b.Search(ctx, query, opts)
+	for _, eb := range e.backends {
+		b := eb.Backend
+		currentOpts := opts
+		if currentOpts.Limit <= 0 {
+			currentOpts.Limit = eb.Limit
+			if currentOpts.Limit <= 0 {
+				currentOpts.Limit = 100
+			}
+		}
+
+		results, err := b.Search(ctx, query, currentOpts)
 		if err != nil {
 			return fmt.Errorf("backend %s failed: %w", b.Name(), err)
+		}
+
+		if len(results) > currentOpts.Limit {
+			results = results[:currentOpts.Limit]
 		}
 		
 		if opts.Count {
@@ -63,10 +81,7 @@ func (e *Engine) Run(ctx context.Context, query string, opts backend.SearchOptio
 			for file, count := range counts {
 				fmt.Fprintf(e.out, "%s:%d\n", file, count)
 			}
-			continue
-		}
-
-		if opts.FilesWithMatches {
+		} else if opts.FilesWithMatches {
 			files := make(map[string]bool)
 			for _, r := range results {
 				if !files[r.File] {
@@ -74,34 +89,40 @@ func (e *Engine) Run(ctx context.Context, query string, opts backend.SearchOptio
 					files[r.File] = true
 				}
 			}
-			continue
-		}
+		} else {
+			for _, r := range results {
+				content := r.Content
+				line := r.Line
 
-		for _, r := range results {
-			content := r.Content
-			line := r.Line
-
-			if r.ContentId != "" {
-				localPath := strings.TrimPrefix(r.File, "/")
-				data, err := os.ReadFile(localPath)
-				if err == nil {
-					sha := getGitBlobSHA1(data)
-					if sha == r.ContentId {
-						content, line = getLineFromOffset(data, r.CharOffset)
+				if r.ContentId != "" {
+					localPath := strings.TrimPrefix(r.File, "/")
+					data, err := os.ReadFile(localPath)
+					if err == nil {
+						sha := getGitBlobSHA1(data)
+						if sha == r.ContentId {
+							content, line = getLineFromOffset(data, r.CharOffset)
+						} else {
+							content = fmt.Sprintf("%s (local file mismatch)", r.Content)
+						}
 					} else {
-						content = fmt.Sprintf("%s (local file mismatch)", r.Content)
+						content = fmt.Sprintf("%s (local file not found)", r.Content)
 					}
+				}
+
+				if opts.LineNumber {
+					fmt.Fprintf(e.out, "%s:%d:%s\n", r.File, line, content)
 				} else {
-					content = fmt.Sprintf("%s (local file not found)", r.Content)
+					fmt.Fprintf(e.out, "%s:%s\n", r.File, content)
 				}
 			}
-
-			if opts.LineNumber {
-				fmt.Fprintf(e.out, "%s:%d:%s\n", r.File, line, content)
-			} else {
-				fmt.Fprintf(e.out, "%s:%s\n", r.File, content)
-			}
 		}
+
+		// Report limit status
+		status := fmt.Sprintf("[%s] Showing %d results (limit: %d).", b.Name(), len(results), currentOpts.Limit)
+		if len(results) >= currentOpts.Limit {
+			status += " Limit reached, there might be more results."
+		}
+		fmt.Fprintln(e.out, status)
 	}
 	return nil
 }
