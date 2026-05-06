@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/restgrep-az/restgrep/internal/backend"
+	"github.com/wh-chromium/restgrep-az/internal/backend"
 )
 
 // MockChromiumBackend simulates a remote code search API for a large codebase like Chromium.
@@ -24,11 +24,12 @@ func NewMockChromiumBackend() *MockChromiumBackend {
 		files: map[string][]string{
 			"src/content/browser/web_contents/web_contents_impl.cc": {
 				"#include \"content/browser/web_contents/web_contents_impl.h\"",
+				"#include \"chrome/browser/ui/omnibox/omnibox_edit_model.h\"",
 				"",
 				"namespace content {",
 				"",
 				"WebContentsImpl::WebContentsImpl(BrowserContext* browser_context) {",
-				"  // Initialize WebContents",
+				"  // Initialize WebContents and Omnibox references",
 				"  InitRenderViewHost();",
 				"}",
 				"",
@@ -218,7 +219,14 @@ src/base/strings/string_util.cc:10:bool EndsWith(StringPiece text, StringPiece s
 			name:  "Word match (-w)",
 			query: "WebContents",
 			opts:  backend.SearchOptions{WordRegexp: true},
-			expected: `src/content/browser/web_contents/web_contents_impl.cc:  // Initialize WebContents
+			expected: `src/content/browser/web_contents/web_contents_impl.cc:  // Initialize WebContents and Omnibox references
+`,
+		},
+		{
+			name:  "Chromium: Omnibox substring",
+			query: "Omnibox",
+			opts:  backend.SearchOptions{},
+			expected: `src/content/browser/web_contents/web_contents_impl.cc:  // Initialize WebContents and Omnibox references
 `,
 		},
 	}

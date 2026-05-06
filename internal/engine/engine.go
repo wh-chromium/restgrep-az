@@ -9,7 +9,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/restgrep-az/restgrep/internal/backend"
+	"github.com/wh-chromium/restgrep-az/internal/backend"
 )
 
 type EngineBackend struct {

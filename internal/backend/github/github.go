@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/restgrep-az/restgrep/internal/backend"
+	"github.com/wh-chromium/restgrep-az/internal/backend"
 )
 
 type Backend struct {
@@ -27,6 +27,7 @@ func (b *Backend) Name() string {
 
 type GHSearchResult struct {
 	Path        string `json:"path"`
+	SHA         string `json:"sha"`
 	TextMatches []struct {
 		Fragment string `json:"fragment"`
 	} `json:"textMatches"`
@@ -48,7 +49,7 @@ func (b *Backend) Search(ctx context.Context, query string, opts backend.SearchO
 	if b.Repo != "" {
 		args = append(args, "--repo", b.Repo)
 	}
-	args = append(args, "--json", "path,textMatches")
+	args = append(args, "--json", "path,sha,textMatches")
 
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	var stdout bytes.Buffer
@@ -84,18 +85,20 @@ func (b *Backend) Search(ctx context.Context, query string, opts backend.SearchO
 					
 					if strings.Contains(lineToCheck, queryToCheck) {
 						results = append(results, backend.SearchResult{
-							File:    res.Path,
-							Line:    1, // GitHub textMatches do not natively provide clean line numbers without raw file parsing
-							Content: strings.TrimSpace(line),
+							File:      res.Path,
+							Line:      1, // GitHub textMatches do not natively provide clean line numbers without raw file parsing
+							Content:   strings.TrimSpace(line),
+							ContentId: res.SHA,
 						})
 					}
 				}
 			}
 		} else {
 			results = append(results, backend.SearchResult{
-				File:    res.Path,
-				Line:    1,
-				Content: "[File match]",
+				File:      res.Path,
+				Line:      1,
+				Content:   "[File match]",
+				ContentId: res.SHA,
 			})
 		}
 	}

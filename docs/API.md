@@ -26,6 +26,7 @@ type Backend interface {
 `restgrep` currently natively supports multiple code-search remote APIs:
 - Azure DevOps (via `az` CLI token and direct REST API)
 - GitHub (via `gh` CLI search command)
+- GitHub API (direct Search API via `gh api` with text-match support)
 
 ### Azure DevOps Backend
 
@@ -37,9 +38,13 @@ When `az rest` fails, it propagates the error.
 
 The GitHub backend natively executes the `gh search code` CLI command and parses the returned JSON payload (`--json path,textMatches`). It allows you to specify a repository constraint (e.g. `owner/repo`) via the settings configuration.
 
-### Settings Configuration
-The settings file must configure the organization and default project for Azure, or the repository target for GitHub. `restgrep` iterates and merges outputs from all configured backends!
+### GitHub API Backend
 
+The GitHub API backend uses `gh api` to call the `/search/code` endpoint directly. It includes the `application/vnd.github.v3.text-match+json` header to retrieve detailed match fragments and indices.
+
+### Settings Configuration
+
+The settings file must configure the organization and default project for Azure, or the repository target for GitHub. `restgrep` iterates and merges outputs from all configured backends!
 ```json
 {
   "backends": [
@@ -51,6 +56,10 @@ The settings file must configure the organization and default project for Azure,
     {
       "type": "github",
       "repo": "wh-chromium/restgrep-az"
+    },
+    {
+      "type": "github-api",
+      "repo": "chromium/chromium"
     }
   ]
 }

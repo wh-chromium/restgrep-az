@@ -6,6 +6,7 @@
 
 - [Azure DevOps Specific Examples](EXAMPLES_AZURE.md)
 - [Chromium / GitHub Specific Examples](EXAMPLES_CHROMIUM.md)
+- [Query Matching Behavior & Wildcards](MATCHING_BEHAVIOR.md)
 
 ## Supported `grep` flags
 

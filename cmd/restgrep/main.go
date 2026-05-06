@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/restgrep-az/restgrep/internal/backend"
-	"github.com/restgrep-az/restgrep/internal/backend/azure"
-	"github.com/restgrep-az/restgrep/internal/backend/github"
-	"github.com/restgrep-az/restgrep/internal/config"
-	"github.com/restgrep-az/restgrep/internal/engine"
+	"github.com/wh-chromium/restgrep-az/internal/backend"
+	"github.com/wh-chromium/restgrep-az/internal/backend/azure"
+	"github.com/wh-chromium/restgrep-az/internal/backend/github"
+	"github.com/wh-chromium/restgrep-az/internal/backend/githubapi"
+	"github.com/wh-chromium/restgrep-az/internal/config"
+	"github.com/wh-chromium/restgrep-az/internal/engine"
 )
 
 func main() {
@@ -66,6 +67,8 @@ func main() {
 			b = azure.New(bCfg.Organization, bCfg.Project)
 		case "github":
 			b = github.New(bCfg.Repo)
+		case "github-api":
+			b = githubapi.New(bCfg.Repo)
 		default:
 			fmt.Fprintf(os.Stderr, "Unknown backend type: %s\n", bCfg.Type)
 			continue

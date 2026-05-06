@@ -5,7 +5,7 @@ import (
 	"os/exec"
 	"testing"
 
-	"github.com/restgrep-az/restgrep/internal/backend"
+	"github.com/wh-chromium/restgrep-az/internal/backend"
 )
 
 // Because `gh` is typically an external binary, we mock the command execution 

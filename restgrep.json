@@ -2,7 +2,13 @@
   "backends": [
     {
       "type": "github",
-      "repo": "chromium/chromium"
+      "repo": "chromium/chromium",
+      "limit": 5
+    },
+    {
+      "type": "github-api",
+      "repo": "chromium/chromium",
+      "limit": 5
     }
   ]
 }

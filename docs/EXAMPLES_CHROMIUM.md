@@ -86,6 +86,23 @@ content/browser/web_contents/web_contents_view_ios.h
 content/browser/web_contents/aura/gesture_nav_simple.h
 ```
 
+## GitHub API Backend Examples
+
+The `github-api` backend uses `gh api` to call the GitHub Search API directly with the `text-match` header.
+
+### Searching for Omnibox (direct API)
+
+```bash
+restgrep "OmniboxEd"
+```
+*(Assuming github-api is configured for chromium/chromium)*
+
+**Output:**
+```text
+chrome/browser/ui/omnibox/omnibox_edit_model.h:class OmniboxEditModel;
+chrome/browser/ui/views/omnibox/omnibox_view_views.h:class OmniboxViewViews;
+```
+
 ## Simulated Chromium Matches
 
 The following examples demonstrate standard `grep` flags using simulated Chromium code data.

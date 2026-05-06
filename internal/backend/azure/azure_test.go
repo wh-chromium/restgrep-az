@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/restgrep-az/restgrep/internal/backend"
-	"github.com/restgrep-az/restgrep/internal/engine"
+	"github.com/wh-chromium/restgrep-az/internal/backend"
+	"github.com/wh-chromium/restgrep-az/internal/engine"
 )
 
 func TestAzureSearch(t *testing.T) {
