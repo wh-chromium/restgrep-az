@@ -2,11 +2,18 @@
 
 `restgrep` provides a CLI experience similar to `grep`, but executes searches remotely across Azure DevOps and GitHub.
 
+## Usage Syntax
+
+```bash
+restgrep [OPTIONS] PATTERN [PATH...]
+```
+
 ## Quick Links
 
 - [Azure DevOps Specific Examples](EXAMPLES_AZURE.md)
 - [Chromium / GitHub Specific Examples](EXAMPLES_CHROMIUM.md)
 - [Query Matching Behavior & Wildcards](MATCHING_BEHAVIOR.md)
+- [Path Filtering Examples](EXAMPLES_PATHS.md)
 
 ## Supported `grep` flags
 

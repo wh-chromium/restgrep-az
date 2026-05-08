@@ -40,6 +40,10 @@ func (b *Backend) Search(ctx context.Context, query string, opts backend.SearchO
 		q = fmt.Sprintf(`"%s"`, q)
 	}
 
+	for _, p := range opts.Paths {
+		q = fmt.Sprintf("%s path:%s", q, p)
+	}
+
 	limit := opts.Limit
 	if limit <= 0 {
 		limit = 100

@@ -47,6 +47,10 @@ func (b *Backend) Search(ctx context.Context, query string, opts backend.SearchO
 		q = fmt.Sprintf(`"%s"`, q)
 	}
 
+	for _, p := range opts.Paths {
+		q = fmt.Sprintf("%s path:%s", q, p)
+	}
+
 	if b.Repo != "" {
 		q = fmt.Sprintf("%s repo:%s", q, b.Repo)
 	}

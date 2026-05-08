@@ -112,6 +112,20 @@ func (m *MockChromiumBackend) Search(ctx context.Context, query string, opts bac
 	}
 
 	for _, file := range fileNames {
+		// Path filtering
+		if len(opts.Paths) > 0 {
+			matchPath := false
+			for _, p := range opts.Paths {
+				if strings.HasPrefix(file, p) {
+					matchPath = true
+					break
+				}
+			}
+			if !matchPath {
+				continue
+			}
+		}
+
 		lines := m.files[file]
 		for i, line := range lines {
 			matched := false
@@ -227,6 +241,14 @@ src/base/strings/string_util.cc:10:bool EndsWith(StringPiece text, StringPiece s
 			query: "Omnibox",
 			opts:  backend.SearchOptions{},
 			expected: `src/content/browser/web_contents/web_contents_impl.cc:  // Initialize WebContents and Omnibox references
+`,
+		},
+		{
+			name:  "Path filtering: src/base",
+			query: "namespace",
+			opts:  backend.SearchOptions{Paths: []string{"src/base"}},
+			expected: `src/base/strings/string_util.cc:namespace base {
+src/base/strings/string_util.cc:}  // namespace base
 `,
 		},
 	}

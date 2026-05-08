@@ -33,11 +33,12 @@ func main() {
 
 	args := flag.Args()
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "Usage: restgrep [OPTION]... PATTERN")
+		fmt.Fprintln(os.Stderr, "Usage: restgrep [OPTION]... PATTERN [PATH...]")
 		os.Exit(1)
 	}
 
 	query := args[0]
+	opts.Paths = args[1:]
 
 	// Load configuration
 	cfg, err := config.Load("restgrep.json")

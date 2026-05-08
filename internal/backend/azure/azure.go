@@ -88,10 +88,23 @@ func (b *Backend) Search(ctx context.Context, query string, opts backend.SearchO
 		Top:        limit,
 		Skip:       0,
 	}
+
+	filters := make(map[string][]string)
 	if b.Project != "" {
-		reqBody.Filters = map[string][]string{
-			"Project": {b.Project},
+		filters["Project"] = []string{b.Project}
+	}
+	if len(opts.Paths) > 0 {
+		var paths []string
+		for _, p := range opts.Paths {
+			if !strings.HasPrefix(p, "/") {
+				p = "/" + p
+			}
+			paths = append(paths, p)
 		}
+		filters["Path"] = paths
+	}
+	if len(filters) > 0 {
+		reqBody.Filters = filters
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)

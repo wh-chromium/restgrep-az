@@ -34,7 +34,15 @@ It is important to note that `restgrep` backends primarily support **Glob-style 
 
 *Note: Passing complex Regular Expressions to `restgrep` will likely result in literal character matches or API errors, as they are not currently translated into Glob syntax.*
 
-## 4. Summary Table
+## 4. Path Filtering
+
+`restgrep` supports standard `grep` positional arguments for path filtering: `restgrep PATTERN [PATH...]`.
+
+- **Azure DevOps**: Map to the `Path` filter array. Paths are automatically prefixed with `/` if missing.
+- **GitHub (CLI/API)**: Appended to the query string as `path:PATH` qualifiers.
+- **Multiple Paths**: If multiple paths are provided, `restgrep` searches in all of them (Logical OR behavior).
+
+## 5. Summary Table
 
 | Matching Feature | Azure DevOps | GitHub (CLI/API) |
 | :--- | :--- | :--- |
@@ -42,4 +50,5 @@ It is important to note that `restgrep` backends primarily support **Glob-style 
 | **Wildcards (`*`, `?`)** | Supported natively | Supported (Limited by GitHub API) |
 | **Case Insensitive (`-i`)**| Supported natively | Supported (Local filter on fragments) |
 | **Whole Word (`-w`)** | Supported natively | Supported (via `"quotes"`) |
+| **Path Filtering** | Supported (via `Path` filter) | Supported (via `path:` qualifier) |
 | **Regex Support** | No (Glob only) | No (Glob only) |

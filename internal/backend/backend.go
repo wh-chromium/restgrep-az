@@ -11,6 +11,7 @@ type SearchOptions struct {
 	FilesWithMatches bool
 	WordRegexp       bool
 	Limit            int
+	Paths            []string
 }
 
 type SearchResult struct {
