@@ -12,9 +12,121 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/wh-chromium/restgrep-az/internal/backend"
 )
+
+func TestEngineInexactSHA1Adjustment(t *testing.T) {
+	// 1. Setup a temporary git repository
+	dir, err := os.MkdirTemp("", "restgrep_git_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	origWd, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origWd)
+
+	repo, err := git.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Commit a file
+	filename := "file.txt"
+	content := "header\nMATCH_LINE\nfooter\n"
+	os.WriteFile(filename, []byte(content), 0644)
+
+	w, err := repo.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Add(filename); err != nil {
+		t.Fatal(err)
+	}
+	commit, err := w.Commit("initial", &git.CommitOptions{
+		Author: &object.Signature{
+			Name:  "Test",
+			Email: "test@example.com",
+			When:  time.Now(),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Get the SHA of the blob
+	commitObj, err := repo.CommitObject(commit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := commitObj.File(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remoteSHA := file.Hash.String()
+
+	// "MATCH_LINE" is at offset 7 in the original file
+	remoteOffset := 7
+
+	// 3. Modify the file locally (add 2 lines at the top)
+	// Now MATCH_LINE is at offset 21 (Assuming 7 chars per line + \n)
+	newContent := "new line 1\nnew line 2\nheader\nMATCH_LINE\nfooter\n"
+	os.WriteFile(filename, []byte(newContent), 0644)
+
+	mockB := &mockGenericBackend{
+		name: "git-test",
+		results: []backend.SearchResult{
+			{
+				File:       filename,
+				ContentId:  remoteSHA,
+				CharOffset: remoteOffset,
+				Content:    "MATCH_LINE",
+			},
+		},
+	}
+
+	t.Run("Adjustment Enabled", func(t *testing.T) {
+		var buf bytes.Buffer
+		eb := EngineBackend{Backend: mockB, Limit: 10}
+		eng := New([]EngineBackend{eb}, &buf, &buf, "parallel")
+
+		opts := backend.SearchOptions{InexactSHA1Adjustment: true, LineNumber: true}
+		if err := eng.Run(context.Background(), "MATCH_LINE", opts); err != nil {
+			t.Fatal(err)
+		}
+
+		output := buf.String()
+		// Correct new line number should be 4 (10*2 + 7? No, just look at the string)
+		// new line 1 (1)
+		// new line 2 (2)
+		// header (3)
+		// MATCH_LINE (4)
+		if !strings.Contains(output, "file.txt:4:MATCH_LINE") {
+			t.Errorf("expected adjusted output to contain correct line 4, got:\n%s", output)
+		}
+	})
+
+	t.Run("Adjustment Disabled", func(t *testing.T) {
+		var buf bytes.Buffer
+		eb := EngineBackend{Backend: mockB, Limit: 10}
+		eng := New([]EngineBackend{eb}, &buf, &buf, "parallel")
+
+		opts := backend.SearchOptions{InexactSHA1Adjustment: false}
+		if err := eng.Run(context.Background(), "MATCH_LINE", opts); err != nil {
+			t.Fatal(err)
+		}
+
+		output := buf.String()
+		if !strings.Contains(output, "local file mismatch") {
+			t.Errorf("expected local file mismatch warning, got:\n%s", output)
+		}
+	})
+}
 
 // MockChromiumBackend simulates a remote code search API for a large codebase like Chromium.
 type MockChromiumBackend struct {
