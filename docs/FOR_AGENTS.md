@@ -1,57 +1,48 @@
-# restgrep: Guide for AI Agents
+# restgrep: Guide for AI Agents & Backend Developers
 
-This document provides a technical specification for implementing new backends in `restgrep`. Use this to add support for proprietary or internal search APIs.
+This document provides a technical specification for implementing new backends and understanding the `restgrep` engine's optimization strategies.
 
 ## Implementation Checklist
 
 To add a new backend, follow these steps:
 
 1.  **Define the Backend**: Create a new package under `internal/backend/` (e.g., `internal/backend/mycompany/`).
-2.  **Implement the Interface**: Your struct must satisfy the `backend.Backend` interface:
+2.  **Implement the Interface**:
     ```go
     type Backend interface {
         Name() string
         Search(ctx context.Context, query string, opts SearchOptions) ([]SearchResult, error)
     }
     ```
-3.  **Testable Execution**: If your backend executes a CLI tool (like `gh`), use the `Executor` interface pattern introduced in the `github` and `githubapi` packages. This allows for rigorous mapping tests without requiring the tool to be installed.
-4.  **Map Flags to API**:
-    - **IgnoreCase (`-i`)**: If the remote API supports case-insensitivity, pass it through. If not, filter the results locally.
-    - **WordRegexp (`-w`)**: Ensure the query matches only whole words. For GitHub, this means wrapping in `"quotes"`. For Azure, it's the default. For others, use regex `\b`.
-    - **Limit (`-m`)**: Pass this to the API's "top" or "per_page" parameter.
-    - **Paths**: Handle multiple positional path arguments (Logical OR). For APIs that don't support OR, execute multiple requests and merge.
-5.  **Populate Local Resolution Metadata**: To enable real-time local file resolution (replacing remote stubs with actual code), your `SearchResult` **MUST** include:
-    - `File`: The repository-relative path (e.g., `src/main.go`).
+3.  **Testable Execution**: Use the `Executor` interface pattern. This allows you to mock CLI commands (like `gh`) or API responses in unit tests without external dependencies.
+4.  **Populate Resolution Metadata**: To enable local line/context extraction, your `SearchResult` **MUST** include:
+    - `File`: Repository-relative path.
     - `ContentId`: The Git blob SHA1 of the file at the time of search.
-    - `CharOffset`: The 0-based character offset of the match.
+    - `CharOffset`: The 0-based character offset of the match (if provided by API).
     - `Length`: The length of the match string.
 
-## Rigorous Testing
+## Engine Architecture: Double-Sort
 
-`restgrep` provides a formal contract validation suite. You **SHOULD** use this in your backend tests to ensure parity with `grep` behavior.
+The `restgrep` engine uses a sophisticated two-pass sorting strategy to balance user experience with extreme performance:
 
-**Example Test:**
+1.  **Phase 1 (Aggregation)**: Results are collected from backends (parallel or sequential).
+2.  **Phase 2 (Sorting for Cache)**: Results are mapped to pointers and sorted globally by **File Path**.
+3.  **Phase 3 (Enrichment)**: The **Single-File MRU Cache** processes the sorted pointers. Because they are grouped by file, `restgrep` achieve **100% cache efficiency**—each file is opened and hashed exactly once.
+4.  **Phase 4 (Sorting for User)**: Enriched results are re-sorted back to their **original provider order** before being printed.
+
+## Flag Mapping Guidelines
+
+- **IgnoreCase (`-i`)**: Pass through to the API if supported; otherwise, filter locally using `strings.ToLower`.
+- **WordRegexp (`-w`)**: Map to native exact-match features (e.g., `"quotes"` for GitHub).
+- **Paths**: Handle multiple positional arguments by executing iterative queries if the remote API does not support `OR` logic for paths.
+
+## Contract Verification
+
+Always use the `VerifyBackendContract` utility in `internal/backend/testing.go` to ensure your new backend adheres to standard `grep` semantics.
+
 ```go
 func TestMyBackend(t *testing.T) {
     b := NewMyBackend(...)
-    cases := []backend.ContractTestCase{
-        {
-            Name: "Substring Search",
-            Query: "search",
-            Options: backend.SearchOptions{},
-            ExpectedFiles: []string{"src/search_service.go"},
-        },
-        {
-            Name: "Word Match Boundary",
-            Query: "WebContents",
-            Options: backend.SearchOptions{WordRegexp: true},
-            ForbiddenStrings: []string{"WebContentsImpl"}, // Should not match partials
-        },
-    }
     backend.VerifyBackendContract(t, b, cases)
 }
 ```
-
-## Integration
-
-Finally, update `cmd/restgrep/main.go` and `internal/config/config.go` to include your new backend type in the JSON settings loader.

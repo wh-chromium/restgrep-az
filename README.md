@@ -6,12 +6,13 @@ A token-efficient normalization layer for remote code search APIs (Azure DevOps 
 
 - **Multi-Backend**: Search across Azure DevOps and GitHub (CLI or API) simultaneously.
 - **Grep Parity**: Supports standard flags like `-i`, `-n`, `-c`, `-l`, `-w`, and `-m`.
+- **Context Control**: Supports `-A`, `-B`, and `-C` using local resolution.
+- **Dynamic Execution**: Choose between `parallel` (simultaneous) or `sequential` (fallback) search modes.
 - **Local Resolution**: Automatically resolves remote match stubs to actual source lines by validating local files against Git blob SHA1 (`ContentId`).
-- **Token Efficient**: Optimized for AI agents by providing concise, normalized output.
+- **Inexact Match Recovery**: Automatically adjusts line offsets using `git diff` logic if local files have drifted from the remote index.
+- **High Performance**: Uses a Single-File MRU cache and global filename sorting to ensure each local file is read/hashed exactly once.
 
 ## Installation & Building
-
-### From Source
 
 Requires Go 1.26 or later.
 
@@ -30,6 +31,8 @@ go build -o restgrep.exe cmd/restgrep/main.go
 
 ```json
 {
+  "execution_mode": "parallel",
+  "inexact_sha1_adjustment": true,
   "backends": [
     {
       "type": "azure",
@@ -42,8 +45,7 @@ go build -o restgrep.exe cmd/restgrep/main.go
       "repo": "chromium/chromium",
       "limit": 10
     }
-  ],
-  "inexact_sha1_adjustment": true
+  ]
 }
 ```
 
@@ -54,27 +56,23 @@ go build -o restgrep.exe cmd/restgrep/main.go
 restgrep "WebContentsImpl"
 ```
 
-### Exact Word Match
+### Context Search (Surrounding Lines)
 ```bash
-restgrep -w "WebContents"
+restgrep -C 2 "Omnibox"
 ```
 
-### With Max Results (Limit)
+### Path Filtering
 ```bash
-restgrep -m 5 "NavigationHandle"
+restgrep "pattern" chrome/browser content/public
 ```
 
 For more details, see [docs/EXAMPLES.md](docs/EXAMPLES.md).
 
-## Authentication
-
-- **Azure**: Requires `az` CLI to be logged in. `restgrep` fetches tokens dynamically.
-- **GitHub**: Requires `gh` CLI to be logged in and authenticated.
-
 ## Documentation
 
-- [API Specification](docs/API.md)
-- [Matching Behavior & Wildcards](docs/MATCHING_BEHAVIOR.md)
+- [API Specification & Configuration](docs/API.md)
+- [Query Matching Behavior & Wildcards](docs/MATCHING_BEHAVIOR.md)
+- [Path Filtering Examples](docs/EXAMPLES_PATHS.md)
 - [Limitations](docs/LIMITATIONS.md)
 - [Guide for AI Agents (Extending restgrep)](docs/FOR_AGENTS.md)
 

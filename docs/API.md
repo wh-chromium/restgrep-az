@@ -1,70 +1,65 @@
 # Restgrep API Documentation
 
-`restgrep` is a normalization layer for various remote code search APIs (currently supporting Azure DevOps). It provides a standard `grep`-like interface that delegates queries to remote APIs, optimizing token usage for AI agents.
+`restgrep` is a normalization layer for remote code search APIs. It provides a standard `grep`-like interface that delegates queries to remote APIs, optimizing token usage and performance.
 
 ## Core Concepts
 
-- **Backend**: A remote service providing search capabilities (e.g., Azure DevOps). Backends implement a common interface.
-- **Engine**: The core component that parses generic `grep` arguments, translates them to backend-specific queries, and formats the output back to `grep`-like strings.
-- **Configuration**: `restgrep` uses a configuration file (e.g., `restgrep.json`) to define project-specific backend settings.
+- **Backend**: A remote service providing search capabilities (e.g., Azure DevOps, GitHub).
+- **Engine**: The core orchestrator that manages parallel/sequential execution, result merging, and local file enrichment.
+- **Double-Sort Strategy**: To maximize cache efficiency, the engine sorts all collected results by **filename** to perform O(files) local resolution, then re-sorts them to match the **original provider order** for the user.
+- **MRU Cache**: A single-file memory cache ensures each unique file is read and hashed only once per search.
 
-## Extensibility
-
-To add a new backend (e.g., GitHub CLI), implement the `backend.Backend` interface:
-
-```go
-type Backend interface {
-	// Name returns the name of the backend.
-	Name() string
-	// Search executes a search using the provided query and options.
-	Search(ctx context.Context, query string, opts SearchOptions) ([]SearchResult, error)
-}
-```
-
-## Supported Backends
-
-`restgrep` currently natively supports multiple code-search remote APIs:
-- Azure DevOps (via `az` CLI token and direct REST API)
-- GitHub (via `gh` CLI search command)
-- GitHub API (direct Search API via `gh api` with text-match support)
-
-### Azure DevOps Backend
-
-The Azure DevOps backend interacts with the Azure DevOps REST API (v7.1).
-It simulates authentication using an Access Token fetched typically via `az account get-access-token` (or `az rest`).
-When `az rest` fails, it propagates the error.
-
-### GitHub Backend
-
-The GitHub backend natively executes the `gh search code` CLI command and parses the returned JSON payload (`--json path,textMatches`). It allows you to specify a repository constraint (e.g. `owner/repo`) via the settings configuration.
-
-### GitHub API Backend
-
-The GitHub API backend uses `gh api` to call the `/search/code` endpoint directly. It includes the `application/vnd.github.v3.text-match+json` header to retrieve detailed match fragments and indices.
-
-### Settings Configuration
-
-The settings file (`restgrep.json`) configures the backends and the execution strategy.
+## Settings Configuration (`restgrep.json`)
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `backends` | Array | List of search backends to use. |
+| `backends` | Array | List of search backends to use (see below). |
 | `execution_mode` | String | `parallel` (default) or `sequential`. |
-| `inexact_sha1_adjustment` | Boolean | If `true`, enables automatic Git-diff adjustment by default. |
+| `inexact_sha1_adjustment` | Boolean | If `true`, enables automatic Git-diff adjustment if local files have drifted. |
 
-#### Execution Modes
+### Execution Modes
 
 1.  **Parallel Mode (`parallel`)**:
     - Executes all backends simultaneously.
-    - Waits for all backends to return results.
     - Merges results from all successful backends.
-    - **Ignores failed backends** (e.g., if one API is down, you still get results from others).
-    - **Optimization**: Performs local file enrichment (MRU cache) **after** all remote results are collected.
+    - **Ignores failed backends** (errors are reported to `stderr`).
 
 2.  **Sequential Fallback Mode (`sequential`)**:
-    - Executes backends one-by-one in the order they are listed.
-    - **Stops after the first successful execution** (even if results are empty).
-    - Useful for prioritizing a fast internal API and falling back to a broader public API only if necessary.
+    - Executes backends one-by-one in order.
+    - **Stops after the first successful execution**.
+
+---
+
+## Supported Backends
+
+### 1. Azure DevOps (`azure`)
+- **API**: Uses Azure DevOps REST API v7.1.
+- **Auth**: Dynamically fetches tokens via `az account get-access-token`.
+- **Metadata**: Provides precise `charOffset`, allowing full local resolution and context.
+
+### 2. GitHub CLI (`github`)
+- **Mechanism**: Wraps the `gh search code` CLI command.
+- **Auth**: Requires `gh auth login`.
+- **Filtering**: Performs local substring filtering on fragments to ensure `grep` accuracy.
+
+### 3. GitHub API (`github-api`)
+- **Mechanism**: Calls the GitHub REST API directly via `gh api`.
+- **Header**: Uses `vnd.github.v3.text-match+json` for rich match metadata.
+- **Advantage**: Higher metadata consistency than the raw CLI backend.
+
+### Backend Config Fields
+
+| Field | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| `type` | String | Yes | `azure`, `github`, or `github-api`. |
+| `organization` | String | Azure only | Azure DevOps organization name. |
+| `project` | String | Azure only | Azure DevOps project name. |
+| `repo` | String | GH only | Target repository (e.g., `chromium/chromium`). |
+| `limit` | Integer | No | Result limit for this backend (default: 100). |
+
+---
+
+## Sample Full Configuration
 
 ```json
 {
@@ -78,14 +73,9 @@ The settings file (`restgrep.json`) configures the backends and the execution st
       "limit": 100
     },
     {
-      "type": "github",
-      "repo": "wh-chromium/restgrep-az",
-      "limit": 50
-    },
-    {
       "type": "github-api",
       "repo": "chromium/chromium",
-      "limit": 20
+      "limit": 50
     }
   ]
 }

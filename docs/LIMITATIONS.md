@@ -1,33 +1,36 @@
-# `restgrep` Limitations
+# `restgrep` Limitations & Constraints
 
-This document outlines the known limitations of `restgrep` that stem from the design of the underlying remote APIs it consumes.
+`restgrep` is a powerful normalization layer, but it is constrained by the design of the remote search APIs it consumes.
 
-## 1. Line Number Inaccuracy (GitHub Backend)
+## 1. Line Number Inaccuracy (GitHub Backends)
 
-The `gh search code` command and its underlying GitHub REST API **do not** provide line numbers in their search results. The API returns a "fragment" of text containing the match, but not its position within the file.
+Neither the GitHub CLI nor the GitHub REST API provide precise character offsets or line numbers for search matches. They provide "text fragments."
 
-As a result, when using the `github` backend, `restgrep` will always report a placeholder line number (e.g., `1`), even when the `-n` flag is used.
+- **Behavior**: When a local file is NOT available, GitHub results will report a placeholder line number (`1`).
+- **Improvement**: If you have the repository checked out locally, `restgrep` will attempt to find the fragment within your local file to resolve the correct line number, though this can be ambiguous if the fragment appears multiple times.
 
-**Example Output:**
-```text
-content/public/browser/web_contents.h:1:class WebContents;
-```
-*(The line number `1` is a placeholder and may not be accurate.)*
+## 2. Remote Context Constraints
 
-In contrast, the `azure` backend can provide accurate line numbers if the file is resolved locally via SHA1 validation, as it gets a `charOffset` from the API.
+Remote APIs do not return surrounding lines of code.
 
-## 2. Lack of Surrounding File Context (Remote-Only)
+- **Standard Behavior**: Without a local repository, context flags (`-A`, `-B`, `-C`) will have no effect on the output.
+- **Solution**: Always use `restgrep` inside a local checkout of the repository for full `grep` parity.
 
-Neither the Azure DevOps nor the GitHub search APIs return the full file content in their initial search responses. This is an intentional design choice to keep the API payloads small and fast.
+## 3. Rate Limiting
 
--   **Azure DevOps:** Provides a character offset (`charOffset`) which allows `restgrep` to calculate the line and content **if and only if** the file is available locally and its SHA1 hash matches.
--   **GitHub:** Provides a small text fragment, but no positional data.
+Remote search APIs (especially GitHub) are strictly rate-limited.
 
-If a file is not present on your local disk, `restgrep` cannot display the full, real line of code and will instead show the metadata provided by the backend (e.g., `[Match at char offset...]` for Azure). To get full `grep` parity in these cases, the file would need to be checked out locally.
+- **GitHub API**: Limits are typically ~10 requests per minute for code search.
+- **Parallel Mode**: `restgrep`'s parallel execution consumes rate limits across multiple backends simultaneously.
+- **Mitigation**: Use the `-m` (max-count) flag to reduce the amount of data requested and processed.
 
-## 3. GitHub Search Rate Limits
+## 4. Path Filtering logic
 
-GitHub's Code Search API is strictly rate-limited (typically 10 requests per minute for authenticated users, or 9 per minute as observed).
+Position path filtering (e.g., `restgrep pattern dir1`) is mapped to remote `path:` filters.
 
-- **Behavior:** `restgrep` does NOT implement internal retries or backoff logic.
-- **Notification:** If the limit is exceeded, `restgrep` will exit with a non-zero status code and print the raw GitHub error (e.g., `HTTP 403: Primary rate limit exceeded`) to `stderr`. Callers should be prepared to handle these failures by implementation of their own delay or backoff strategies.
+- **Azure DevOps**: Robust directory-level filtering.
+- **GitHub**: Highly dependent on GitHub's indexing. GitHub may sometimes include results from paths that closely match the filter but are not exact directory sub-matches.
+
+## 5. Regex vs. Glob
+
+`restgrep` translates queries into **Glob** wildcards (`*`, `?`) for remote APIs. It does **not** support full PCRE or POSIX Regular Expressions. Passing complex regex characters (like `(` or `|`) will be treated as literals or may cause API errors.
