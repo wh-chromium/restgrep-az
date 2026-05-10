@@ -36,6 +36,7 @@ func main() {
 	var contextLines int
 	flag.IntVar(&contextLines, "C", 0, "Print NUM lines of leading and trailing context")
 	flag.IntVar(&contextLines, "context", 0, "Print NUM lines of leading and trailing context")
+	flag.BoolVar(&opts.InexactSHA1Adjustment, "git-diff-inexact-sha1-adjustment", false, "Adjust results using git diff if local SHA1 does not match")
 
 	flag.Parse()
 

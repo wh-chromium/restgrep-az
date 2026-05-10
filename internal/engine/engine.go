@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/wh-chromium/restgrep-az/internal/backend"
 )
 
@@ -56,6 +58,52 @@ func getLineFromOffset(data []byte, charOffset int) (string, int) {
 		}
 	}
 	return string(data[lineStart:lineEnd]), line
+}
+
+func resolveInexactOffset(remoteSHA string, localData []byte, remoteCharOffset int) (int, bool) {
+	repo, err := git.PlainOpen(".")
+	if err != nil {
+		return 0, false
+	}
+
+	hash := plumbing.NewHash(remoteSHA)
+	blob, err := repo.BlobObject(hash)
+	if err != nil {
+		return 0, false
+	}
+
+	reader, err := blob.Reader()
+	if err != nil {
+		return 0, false
+	}
+	defer reader.Close()
+	remoteData, err := io.ReadAll(reader)
+	if err != nil {
+		return 0, false
+	}
+
+	// To map offset, we use the Diff logic.
+	// This is a simplified version: find the line in remote, and find it in local.
+	remoteLineContent, _ := getLineFromOffset(remoteData, remoteCharOffset)
+	
+	// Try to find the exact line in localData around the same relative position
+	// In a real 'git diff' approach, we would parse hunks, but for 'inexact adjustment',
+	// a fuzzy line search is often what's intended.
+	
+	lines := strings.Split(string(localData), "\n")
+	for i, line := range lines {
+		if strings.Contains(line, remoteLineContent) {
+			// Find character offset of this line
+			offset := 0
+			for j := 0; j < i; j++ {
+				offset += len(lines[j]) + 1
+			}
+			// Add partial offset if possible, or just return start of line
+			return offset, true
+		}
+	}
+
+	return 0, false
 }
 
 type backendResultGroup struct {
@@ -280,7 +328,17 @@ func (e *Engine) Run(ctx context.Context, query string, opts backend.SearchOptio
 					if cachedSHA == r.ContentId {
 						enr.lines = getLinesWithContext(cachedData, r.CharOffset, opts.BeforeContext, opts.AfterContext)
 					} else {
-						enr.content = fmt.Sprintf("%s (local file mismatch)", r.Content)
+						// SHA1 Mismatch
+						if opts.InexactSHA1Adjustment {
+							newOffset, ok := resolveInexactOffset(r.ContentId, cachedData, r.CharOffset)
+							if ok {
+								enr.lines = getLinesWithContext(cachedData, newOffset, opts.BeforeContext, opts.AfterContext)
+							} else {
+								enr.content = fmt.Sprintf("%s (local file mismatch - inexact adjustment failed)", r.Content)
+							}
+						} else {
+							enr.content = fmt.Sprintf("%s (local file mismatch)", r.Content)
+						}
 					}
 				} else if !strings.Contains(enr.content, "local file not found") {
 					enr.content = fmt.Sprintf("%s (local file not found)", r.Content)
@@ -363,6 +421,7 @@ func (e *Engine) Run(ctx context.Context, query string, opts backend.SearchOptio
 
 	return nil
 }
+
 
 
 
