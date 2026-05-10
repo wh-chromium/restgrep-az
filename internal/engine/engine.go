@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
@@ -35,9 +36,12 @@ func New(backends []EngineBackend, out io.Writer, errOut io.Writer, mode string)
 }
 
 func getGitBlobSHA1(data []byte) string {
+	// Normalize line endings to LF (Git's default internal format)
+	normalized := bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
+	
 	h := sha1.New()
-	h.Write([]byte(fmt.Sprintf("blob %d\x00", len(data))))
-	h.Write(data)
+	h.Write([]byte(fmt.Sprintf("blob %d\x00", len(normalized))))
+	h.Write(normalized)
 	return hex.EncodeToString(h.Sum(nil))
 }
 
