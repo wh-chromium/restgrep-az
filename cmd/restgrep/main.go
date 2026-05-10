@@ -24,8 +24,7 @@ func main() {
 				Backends: []config.BackendConfig{
 					{Type: "azure", Organization: "fabrikam", Project: "MyFirstProject", Limit: 100},
 				},
-				ExecutionMode:         "parallel",
-				InexactSHA1Adjustment: false,
+				ExecutionMode: "parallel",
 			}
 		} else {
 			fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
@@ -46,7 +45,6 @@ func main() {
 	
 	var contextLines int
 	flag.IntVar(&contextLines, "C", 0, "Print NUM lines of surrounding context")
-	flag.BoolVar(&opts.InexactSHA1Adjustment, "git-diff-inexact-sha1-adjustment", cfg.InexactSHA1Adjustment, "Use git diff for drift recovery")
 	flag.BoolVar(&opts.Debug, "debug", false, "Show detailed pipeline logs")
 
 	flag.Parse()
@@ -63,6 +61,7 @@ func main() {
 	}
 
 	query := args[0]
+	opts.Query = query
 	opts.Paths = args[1:]
 
 	// 3. Instantiate Frontends and Resolvers
@@ -96,9 +95,6 @@ func main() {
 		if mode == "" {
 			mode = cfg.BackendMode
 		}
-		if opts.InexactSHA1Adjustment {
-			mode = string(models.ModeGitDiff)
-		}
 		if mode == "" {
 			mode = string(models.ModeLocal)
 		}
@@ -107,11 +103,9 @@ func main() {
 		case models.ModeNaive:
 			f.Resolver = &resolver.NaiveResolver{}
 		case models.ModeLocal:
-			f.Resolver = &resolver.LocalNoDiffResolver{}
-		case models.ModeGitDiff:
-			f.Resolver = &resolver.LocalWithDiffResolver{}
+			f.Resolver = &resolver.LocalResolver{}
 		default:
-			f.Resolver = &resolver.LocalNoDiffResolver{}
+			f.Resolver = &resolver.LocalResolver{}
 		}
 
 		eFrontends = append(eFrontends, f)

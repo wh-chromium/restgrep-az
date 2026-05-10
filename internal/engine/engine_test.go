@@ -12,7 +12,6 @@ import (
 	"github.com/wh-chromium/restgrep-az/internal/resolver"
 )
 
-// mockFrontend implements the Frontend interface for testing.
 type mockFrontend struct {
 	name    string
 	results []models.IntermediateResult
@@ -23,15 +22,13 @@ func (m *mockFrontend) Search(ctx context.Context, query string, opts models.Sea
 	return m.results, nil
 }
 
-func TestEngine3x3Matrix(t *testing.T) {
-	// Setup test data
-	content := "line 1\nline 2\nMATCH\n"
-	tmpFile, _ := os.CreateTemp("", "3x3_test_*.txt")
+func TestEngine3x2Matrix(t *testing.T) {
+	// 1. Setup local file
+	content := "header\nMATCH_HERE\nfooter\n"
+	tmpFile, _ := os.CreateTemp("", "engine_relaxed_*.txt")
 	defer os.Remove(tmpFile.Name())
 	tmpFile.Write([]byte(content))
 	tmpFile.Close()
-
-	sha := resolver.GetGitBlobSHA1([]byte(content))
 	fileName := tmpFile.Name()
 
 	// Frontends
@@ -42,48 +39,47 @@ func TestEngine3x3Matrix(t *testing.T) {
 		res  resolver.Resolver
 	}{
 		{"naive", &resolver.NaiveResolver{}},
-		{"local", &resolver.LocalNoDiffResolver{}},
-		{"git-diff", &resolver.LocalWithDiffResolver{}},
+		{"local", &resolver.LocalResolver{}},
 	}
 
 	for _, fName := range frontends {
-		for _, resInfo := range resolvers {
-			t.Run(fmt.Sprintf("%s_%s", fName, resInfo.name), func(t *testing.T) {
+		for _, rInfo := range resolvers {
+			t.Run(fmt.Sprintf("%s_%s", fName, rInfo.name), func(t *testing.T) {
 				var buf bytes.Buffer
 				
-				// Create mock results
+				// Simulate a "stale" remote result (offset is wrong, SHA is wrong)
 				ir := models.IntermediateResult{
 					File:        fileName,
-					RemoteSHA:   sha,
-					CharOffset:  14, // "MATCH"
-					RawFragment: "[Remote Fragment]",
+					RemoteSHA:   "stale-sha",
+					CharOffset:  999, // Way off
+					RawFragment: "[Remote Stub]",
 					LineNumber:  1,
 				}
-				
+
 				mf := &mockFrontend{name: fName, results: []models.IntermediateResult{ir}}
 				ef := EngineFrontend{
 					Frontend: mf,
-					Resolver: resInfo.res,
+					Resolver: rInfo.res,
 					Limit:    10,
 				}
 
 				eng := New([]EngineFrontend{ef}, &buf, &buf, "parallel")
-				err := eng.Run(context.Background(), "MATCH", models.SearchOptions{})
-				if err != nil {
-					t.Fatalf("Run failed: %v", err)
-				}
+				opts := models.SearchOptions{Query: "MATCH_HERE"}
+				eng.Run(context.Background(), "MATCH_HERE", opts)
 
 				output := buf.String()
 				
-				// Expectations
-				switch resInfo.name {
-				case "naive":
-					if !strings.Contains(output, "[Remote Fragment]") {
-						t.Errorf("Naive resolver failed to use raw fragment")
+				if rInfo.name == "naive" {
+					if !strings.Contains(output, "[Remote Stub]") {
+						t.Errorf("Naive failed to use raw fragment")
 					}
-				case "local", "git-diff":
-					if !strings.Contains(output, "MATCH") || strings.Contains(output, "[Remote Fragment]") {
-						t.Errorf("%s resolver failed to resolve local content. Output:\n%s", resInfo.name, output)
+				} else {
+					// Local (relaxed) should find the string even if offset/SHA were wrong
+					if !strings.Contains(output, "MATCH_HERE") || strings.Contains(output, "[Remote Stub]") {
+						t.Errorf("Local relaxed resolver failed to find pattern. Output:\n%s", output)
+					}
+					if !strings.Contains(output, "(relaxed match)") {
+						t.Errorf("Expected relaxed match warning")
 					}
 				}
 			})
@@ -92,7 +88,6 @@ func TestEngine3x3Matrix(t *testing.T) {
 }
 
 func TestEngineExecutionStrategies(t *testing.T) {
-	// Re-implement simplified strategy tests
 	b1 := &mockFrontend{name: "b1", results: []models.IntermediateResult{{File: "f1", RawFragment: "c1"}}}
 	b2 := &mockFrontend{name: "b2", results: []models.IntermediateResult{{File: "f2", RawFragment: "c2"}}}
 
@@ -105,7 +100,7 @@ func TestEngineExecutionStrategies(t *testing.T) {
 		eng := New(backends, &buf, &buf, "parallel")
 		eng.Run(context.Background(), "q", models.SearchOptions{})
 		if !strings.Contains(buf.String(), "f1") || !strings.Contains(buf.String(), "f2") {
-			t.Errorf("Parallel failed to aggregate")
+			t.Errorf("Parallel failed to aggregate successes")
 		}
 	})
 
@@ -118,7 +113,7 @@ func TestEngineExecutionStrategies(t *testing.T) {
 		eng := New(backends, &buf, &buf, "sequential")
 		eng.Run(context.Background(), "q", models.SearchOptions{})
 		if !strings.Contains(buf.String(), "f1") || strings.Contains(buf.String(), "f2") {
-			t.Errorf("Sequential failed to stop after first success")
+			t.Errorf("Sequential failed to stop after first success. Output: %s", buf.String())
 		}
 	})
 }

@@ -1,0 +1,9 @@
+{
+  "backends": [
+    {
+      "type": "github",
+      "repo": "wh-chromium/chromium-ripgrep-ignore",
+      "backend_mode": "local"
+    }
+  ]
+}

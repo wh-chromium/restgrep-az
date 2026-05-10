@@ -16,7 +16,6 @@ type ResolverMode string
 const (
 	ModeNaive     ResolverMode = "naive"
 	ModeLocal     ResolverMode = "local"
-	ModeGitDiff   ResolverMode = "git-diff"
 )
 
 // SearchOptions is the shared configuration for a search run.
@@ -24,12 +23,13 @@ type SearchOptions struct {
 	IgnoreCase            bool
 	LineNumber            bool
 	Count                 bool
-	FilesWithMatches      bool
+	FilesWithMatches bool
 	WordRegexp            bool
 	Limit                 int
 	Paths                 []string
 	AfterContext          int
 	BeforeContext         int
-	InexactSHA1Adjustment bool
+	InexactSHA1Adjustment bool // Deprecated
 	Debug                 bool
+	Query                 string // The original query pattern
 }

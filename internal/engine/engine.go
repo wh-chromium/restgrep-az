@@ -159,7 +159,7 @@ func (e *Engine) Run(ctx context.Context, query string, opts models.SearchOption
 	// 3. Resolve all
 	finalResults := make(map[*models.IntermediateResult]resolver.Result)
 	for _, p := range allPtrs {
-		res := p.resolver.Resolve(ctx, *p.ir, opts.Debug)
+		res := p.resolver.Resolve(ctx, *p.ir, opts)
 		finalResults[p.ir] = res
 	}
 

@@ -5,12 +5,10 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"os"
+	"regexp"
 	"strings"
 
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/wh-chromium/restgrep-az/internal/models"
 )
 
@@ -22,14 +20,14 @@ type Result struct {
 }
 
 type Resolver interface {
-	Resolve(ctx context.Context, ir models.IntermediateResult, debug bool) Result
+	Resolve(ctx context.Context, ir models.IntermediateResult, opts models.SearchOptions) Result
 }
 
-// 1. Naive Resolver
+// 1. Naive Resolver: Directly uses what the API returned.
 type NaiveResolver struct{}
 
-func (n *NaiveResolver) Resolve(ctx context.Context, ir models.IntermediateResult, debug bool) Result {
-	if debug {
+func (n *NaiveResolver) Resolve(ctx context.Context, ir models.IntermediateResult, opts models.SearchOptions) Result {
+	if opts.Debug {
 		fmt.Printf("[DEBUG][resolver] Naive resolution for %s\n", ir.File)
 	}
 	return Result{
@@ -39,99 +37,85 @@ func (n *NaiveResolver) Resolve(ctx context.Context, ir models.IntermediateResul
 	}
 }
 
-// 2. Local No Diff Resolver
-type LocalNoDiffResolver struct{}
+// 2. Local Resolver: Tries to find the code in a local file if it exists.
+type LocalResolver struct{}
 
-func (l *LocalNoDiffResolver) Resolve(ctx context.Context, ir models.IntermediateResult, debug bool) Result {
-	if debug {
-		fmt.Printf("[DEBUG][resolver] LocalNoDiff resolution for %s\n", ir.File)
-	}
-	
-	if ir.RemoteSHA == "" {
-		return Result{File: ir.File, Line: ir.LineNumber, Content: ir.RawFragment, Message: "(no SHA provided)"}
+func (l *LocalResolver) Resolve(ctx context.Context, ir models.IntermediateResult, opts models.SearchOptions) Result {
+	if opts.Debug {
+		fmt.Printf("[DEBUG][resolver] Local resolution for %s\n", ir.File)
 	}
 
 	localPath := strings.TrimPrefix(ir.File, "/")
 	data, err := os.ReadFile(localPath)
 	if err != nil {
-		if debug {
+		if opts.Debug {
 			fmt.Printf("[DEBUG][resolver] Local file not found: %s\n", localPath)
 		}
 		return Result{File: ir.File, Line: ir.LineNumber, Content: ir.RawFragment, Message: "(local file not found)"}
 	}
 
-	sha := GetGitBlobSHA1(data)
-	if sha == ir.RemoteSHA {
-		if debug {
-			fmt.Printf("[DEBUG][resolver] SHA1 matched for %s\n", ir.File)
-		}
-		if ir.CharOffset >= 0 {
-			content, line := GetLineFromOffset(data, ir.CharOffset)
-			return Result{File: ir.File, Line: line, Content: content}
-		}
-		// Fallback if offset is missing but SHA matches
-		return Result{File: ir.File, Line: ir.LineNumber, Content: ir.RawFragment}
-	}
-
-	if debug {
-		fmt.Printf("[DEBUG][resolver] SHA1 mismatch for %s (local: %s, remote: %s)\n", ir.File, sha, ir.RemoteSHA)
-	}
-	return Result{File: ir.File, Line: ir.LineNumber, Content: ir.RawFragment, Message: "(local file mismatch)"}
-}
-
-// 3. Local With Diff Resolver
-type LocalWithDiffResolver struct{}
-
-func (l *LocalWithDiffResolver) Resolve(ctx context.Context, ir models.IntermediateResult, debug bool) Result {
-	if debug {
-		fmt.Printf("[DEBUG][resolver] LocalWithDiff resolution for %s\n", ir.File)
-	}
-
-	if ir.RemoteSHA == "" {
-		return Result{File: ir.File, Line: ir.LineNumber, Content: ir.RawFragment, Message: "(no SHA provided)"}
-	}
-
-	localPath := strings.TrimPrefix(ir.File, "/")
-	data, err := os.ReadFile(localPath)
-	if err != nil {
-		return Result{File: ir.File, Line: ir.LineNumber, Content: ir.RawFragment, Message: "(local file not found)"}
-	}
-
-	sha := GetGitBlobSHA1(data)
-	if sha == ir.RemoteSHA {
-		if debug {
-			fmt.Printf("[DEBUG][resolver] SHA1 matched for %s\n", ir.File)
-		}
-		if ir.CharOffset >= 0 {
-			content, line := GetLineFromOffset(data, ir.CharOffset)
-			return Result{File: ir.File, Line: line, Content: content}
-		}
-		return Result{File: ir.File, Line: ir.LineNumber, Content: ir.RawFragment}
-	}
-
-	// SHA Mismatch: Try Diff Adjustment
-	if debug {
-		fmt.Printf("[DEBUG][resolver] SHA1 mismatch, attempting diff adjustment for %s\n", ir.File)
-	}
+	// Strategy: If we have an offset, check there first.
+	// But since we are "relaxed", we will also search the file for the pattern.
 	
-	newOffset, ok := resolveInexactOffset(ir.RemoteSHA, data, ir.CharOffset)
-	if ok {
-		if debug {
-			fmt.Printf("[DEBUG][resolver] Diff adjustment successful for %s\n", ir.File)
-		}
-		content, line := GetLineFromOffset(data, newOffset)
-		return Result{File: ir.File, Line: line, Content: content}
+	// Try to find the line in the current local data.
+	q := opts.Query
+	if q == "" {
+		// Fallback to fragment if query is somehow missing from options
+		q = ir.RawFragment
 	}
 
-	if debug {
-		fmt.Printf("[DEBUG][resolver] Diff adjustment failed for %s\n", ir.File)
+	foundOffset := -1
+	
+	// If WordRegexp is active, use regex for exact word search
+	if opts.WordRegexp {
+		pattern := `\b` + regexp.QuoteMeta(q) + `\b`
+		if opts.IgnoreCase {
+			pattern = `(?i)\b` + regexp.QuoteMeta(q) + `\b`
+		}
+		re, err := regexp.Compile(pattern)
+		if err == nil {
+			loc := re.FindIndex(data)
+			if loc != nil {
+				foundOffset = loc[0]
+			}
+		}
+	} else {
+		// Simple substring search
+		searchData := string(data)
+		searchTerm := q
+		if opts.IgnoreCase {
+			searchData = strings.ToLower(searchData)
+			searchTerm = strings.ToLower(searchTerm)
+		}
+		foundOffset = strings.Index(searchData, searchTerm)
 	}
-	return Result{File: ir.File, Line: ir.LineNumber, Content: ir.RawFragment, Message: "(local file mismatch - adjustment failed)"}
+
+	if foundOffset >= 0 {
+		content, line := GetLineFromOffset(data, foundOffset)
+		
+		// If SHA1 matches, it's a "High Confidence" local resolution.
+		// If it doesn't match, we still found the code, so we print it but maybe add a hint.
+		message := ""
+		if ir.RemoteSHA != "" {
+			localSHA := GetGitBlobSHA1(data)
+			if localSHA != ir.RemoteSHA {
+				message = "(relaxed match)"
+			}
+		}
+		
+		return Result{File: ir.File, Line: line, Content: content, Message: message}
+	}
+
+	if opts.Debug {
+		fmt.Printf("[DEBUG][resolver] Query pattern not found in local file: %s\n", localPath)
+	}
+	return Result{File: ir.File, Line: ir.LineNumber, Content: ir.RawFragment, Message: "(local file out of sync)"}
 }
 
-// Helpers (moved from engine)
+// Helpers
 
 func GetGitBlobSHA1(data []byte) string {
+	// Re-calculating for the "relaxed match" hint
 	h := sha1.New()
 	h.Write([]byte(fmt.Sprintf("blob %d\x00", len(data))))
 	h.Write(data)
@@ -158,48 +142,4 @@ func GetLineFromOffset(data []byte, charOffset int) (string, int) {
 		}
 	}
 	return string(data[lineStart:lineEnd]), line
-}
-
-func resolveInexactOffset(remoteSHA string, localData []byte, remoteCharOffset int) (int, bool) {
-	if remoteCharOffset < 0 {
-		return 0, false
-	}
-	repo, err := git.PlainOpen(".")
-	if err != nil {
-		return 0, false
-	}
-
-	hash := plumbing.NewHash(remoteSHA)
-	blob, err := repo.BlobObject(hash)
-	if err != nil {
-		return 0, false
-	}
-
-	reader, err := blob.Reader()
-	if err != nil {
-		return 0, false
-	}
-	defer reader.Close()
-	remoteData, err := io.ReadAll(reader)
-	if err != nil {
-		return 0, false
-	}
-
-	remoteLineContent, _ := GetLineFromOffset(remoteData, remoteCharOffset)
-	if remoteLineContent == "" {
-		return 0, false
-	}
-	
-	lines := strings.Split(string(localData), "\n")
-	for i, line := range lines {
-		if strings.Contains(line, remoteLineContent) {
-			offset := 0
-			for j := 0; j < i; j++ {
-				offset += len(lines[j]) + 1
-			}
-			return offset, true
-		}
-	}
-
-	return 0, false
 }
