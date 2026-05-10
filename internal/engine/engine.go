@@ -90,21 +90,41 @@ func (e *Engine) Run(ctx context.Context, query string, opts backend.SearchOptio
 				}
 			}
 		} else {
+			var cachedFile string
+			var cachedData []byte
+			var cachedSHA string
+
 			for _, r := range results {
 				content := r.Content
 				line := r.Line
 
 				if r.ContentId != "" {
 					localPath := strings.TrimPrefix(r.File, "/")
-					data, err := os.ReadFile(localPath)
-					if err == nil {
-						sha := getGitBlobSHA1(data)
-						if sha == r.ContentId {
-							content, line = getLineFromOffset(data, r.CharOffset)
+					if localPath != cachedFile {
+						// Cache miss: read new file
+						data, err := os.ReadFile(localPath)
+						if err == nil {
+							cachedFile = localPath
+							cachedData = data
+							cachedSHA = getGitBlobSHA1(data)
+						} else {
+							// Reset cache on failure
+							cachedFile = ""
+							cachedData = nil
+							cachedSHA = ""
+							content = fmt.Sprintf("%s (local file not found)", r.Content)
+						}
+					}
+
+					// Use cached data if path matches
+					if localPath == cachedFile {
+						if cachedSHA == r.ContentId {
+							content, line = getLineFromOffset(cachedData, r.CharOffset)
 						} else {
 							content = fmt.Sprintf("%s (local file mismatch)", r.Content)
 						}
-					} else {
+					} else if !strings.Contains(content, "local file not found") {
+						// If we didn't just set 'not found' above, and path doesn't match, it was a miss
 						content = fmt.Sprintf("%s (local file not found)", r.Content)
 					}
 				}

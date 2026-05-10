@@ -7,6 +7,8 @@ package engine
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -151,6 +153,69 @@ func (m *MockChromiumBackend) Search(ctx context.Context, query string, opts bac
 
 	return results, nil
 }
+
+func TestEngineLocalResolutionWithCache(t *testing.T) {
+	// 1. Create a temporary file
+	content := "line one\nline two\nline three\n"
+	tmpFile, err := os.CreateTemp("", "restgrep_test_*.txt")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", tmpFile)
+	}
+	defer os.Remove(tmpFile.Name())
+	if _, err := tmpFile.Write([]byte(content)); err != nil {
+		t.Fatalf("failed to write to temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	sha := getGitBlobSHA1([]byte(content))
+	fileName := tmpFile.Name()
+
+	// 2. Create a mock backend that returns 2 matches for this file
+	mockB := &mockGenericBackend{
+		name: "test-cache",
+		results: []backend.SearchResult{
+			{
+				File:       fileName,
+				ContentId:  sha,
+				CharOffset: 0, // "line one"
+				Content:    "[Stub 1]",
+			},
+			{
+				File:       fileName,
+				ContentId:  sha,
+				CharOffset: 9, // "line two"
+				Content:    "[Stub 2]",
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	eb := EngineBackend{Backend: mockB, Limit: 10}
+	eng := New([]EngineBackend{eb}, &buf)
+
+	// 3. Run engine
+	if err := eng.Run(context.Background(), "unused", backend.SearchOptions{}); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	actual := buf.String()
+	expected := fmt.Sprintf("%s:line one\n%s:line two\n[test-cache] Showing 2 results (limit: 10).\n", fileName, fileName)
+	
+	if actual != expected {
+		t.Errorf("expected:\n%q\ngot:\n%q", expected, actual)
+	}
+}
+
+type mockGenericBackend struct {
+	name    string
+	results []backend.SearchResult
+}
+
+func (m *mockGenericBackend) Name() string { return m.name }
+func (m *mockGenericBackend) Search(ctx context.Context, query string, opts backend.SearchOptions) ([]backend.SearchResult, error) {
+	return m.results, nil
+}
+
 
 func TestEngineChromiumSimulations(t *testing.T) {
 	mockBackend := NewMockChromiumBackend()
