@@ -7,10 +7,9 @@ import (
 	"fmt"
 	"net/url"
 	"os/exec"
-	"regexp"
 	"strings"
 
-	"github.com/wh-chromium/restgrep-az/internal/backend"
+	"github.com/wh-chromium/restgrep-az/internal/models"
 )
 
 type Executor interface {
@@ -59,26 +58,13 @@ type GHAPISearchResponse struct {
 	} `json:"items"`
 }
 
-func (b *Backend) Search(ctx context.Context, query string, opts backend.SearchOptions) ([]backend.SearchResult, error) {
+func (b *Backend) Search(ctx context.Context, query string, opts models.SearchOptions) ([]models.IntermediateResult, error) {
 	paths := opts.Paths
 	if len(paths) == 0 {
 		paths = []string{""}
 	}
 
-	var wordRe *regexp.Regexp
-	if opts.WordRegexp {
-		pattern := `\b` + regexp.QuoteMeta(query) + `\b`
-		if opts.IgnoreCase {
-			pattern = `(?i)\b` + regexp.QuoteMeta(query) + `\b`
-		}
-		var err error
-		wordRe, err = regexp.Compile(pattern)
-		if err != nil {
-			return nil, fmt.Errorf("invalid word-regexp: %w", err)
-		}
-	}
-
-	var allResults []backend.SearchResult
+	var allResults []models.IntermediateResult
 	for _, p := range paths {
 		q := query
 		if opts.WordRegexp {
@@ -103,9 +89,17 @@ func (b *Backend) Search(ctx context.Context, query string, opts backend.SearchO
 
 		apiUrl := fmt.Sprintf("/search/code?q=%s&per_page=%d", url.QueryEscape(q), limit)
 
+		if opts.Debug {
+			fmt.Printf("[DEBUG][github-api] Outgoing GET: %s\n", apiUrl)
+		}
+
 		stdout, stderr, err := b.Executor.Execute(ctx, "gh", "api", "-H", "Accept: application/vnd.github.v3.text-match+json", apiUrl)
 		if err != nil {
 			return nil, fmt.Errorf("gh api failed for path %q: %w, stderr: %s", p, err, string(stderr))
+		}
+
+		if opts.Debug {
+			fmt.Printf("[DEBUG][github-api] Raw Output: %s\n", string(stdout))
 		}
 
 		var searchResp GHAPISearchResponse
@@ -119,38 +113,44 @@ func (b *Backend) Search(ctx context.Context, query string, opts backend.SearchO
 					lines := strings.Split(tm.Fragment, "\n")
 					for _, line := range lines {
 						matched := false
-						if opts.WordRegexp {
-							matched = wordRe.MatchString(line)
-						} else {
-							lineToCheck := line
-							queryToCheck := query
-							if opts.IgnoreCase {
-								lineToCheck = strings.ToLower(lineToCheck)
-								queryToCheck = strings.ToLower(queryToCheck)
-							}
+						lineToCheck := line
+						queryToCheck := query
+						if opts.IgnoreCase {
+							lineToCheck = strings.ToLower(lineToCheck)
+							queryToCheck = strings.ToLower(queryToCheck)
+						}
 
-							if strings.Contains(lineToCheck, queryToCheck) {
-								matched = true
-							}
+						if strings.Contains(lineToCheck, queryToCheck) {
+							matched = true
 						}
 
 						if matched {
-							allResults = append(allResults, backend.SearchResult{
-								File:      item.Path,
-								Line:      1,
-								Content:   strings.TrimSpace(line),
-								ContentId: item.ContentId,
-							})
+							ir := models.IntermediateResult{
+								File:        item.Path,
+								RemoteSHA:   item.ContentId,
+								CharOffset:  -1,
+								RawFragment: strings.TrimSpace(line),
+								LineNumber:  1,
+							}
+							allResults = append(allResults, ir)
+							if opts.Debug {
+								fmt.Printf("[DEBUG][github-api] Translated Intermediate: %+v\n", ir)
+							}
 						}
 					}
 				}
 			} else {
-				allResults = append(allResults, backend.SearchResult{
-					File:      item.Path,
-					Line:      1,
-					Content:   "[File match]",
-					ContentId: item.ContentId,
-				})
+				ir := models.IntermediateResult{
+					File:        item.Path,
+					RemoteSHA:   item.ContentId,
+					CharOffset:  -1,
+					RawFragment: "[File match]",
+					LineNumber:  1,
+				}
+				allResults = append(allResults, ir)
+				if opts.Debug {
+					fmt.Printf("[DEBUG][github-api] Translated Intermediate: %+v\n", ir)
+				}
 			}
 		}
 		

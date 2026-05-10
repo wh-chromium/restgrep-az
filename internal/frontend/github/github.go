@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/wh-chromium/restgrep-az/internal/backend"
+	"github.com/wh-chromium/restgrep-az/internal/models"
 )
 
 type Executor interface {
@@ -51,7 +51,7 @@ type GHSearchResult struct {
 	} `json:"textMatches"`
 }
 
-func (b *Backend) Search(ctx context.Context, query string, opts backend.SearchOptions) ([]backend.SearchResult, error) {
+func (b *Backend) Search(ctx context.Context, query string, opts models.SearchOptions) ([]models.IntermediateResult, error) {
 	paths := opts.Paths
 	if len(paths) == 0 {
 		paths = []string{""} // Root/all
@@ -70,10 +70,9 @@ func (b *Backend) Search(ctx context.Context, query string, opts backend.SearchO
 		}
 	}
 
-	var allResults []backend.SearchResult
+	var allResults []models.IntermediateResult
 	for _, p := range paths {
 		q := query
-		// In GitHub code search, exact match can be wrapped in quotes
 		if opts.WordRegexp {
 			q = fmt.Sprintf(`"%s"`, q)
 		}
@@ -93,9 +92,17 @@ func (b *Backend) Search(ctx context.Context, query string, opts backend.SearchO
 		}
 		args = append(args, "--json", "path,sha,textMatches")
 
+		if opts.Debug {
+			fmt.Printf("[DEBUG][github] Executing: gh %s\n", strings.Join(args, " "))
+		}
+
 		stdout, stderr, err := b.Executor.Execute(ctx, "gh", args...)
 		if err != nil {
 			return nil, fmt.Errorf("gh search code failed for path %q: %w, stderr: %s", p, err, string(stderr))
+		}
+
+		if opts.Debug {
+			fmt.Printf("[DEBUG][github] Raw Output: %s\n", string(stdout))
 		}
 
 		var ghResults []GHSearchResult
@@ -122,22 +129,32 @@ func (b *Backend) Search(ctx context.Context, query string, opts backend.SearchO
 						}
 						
 						if matched {
-							allResults = append(allResults, backend.SearchResult{
-								File:      res.Path,
-								Line:      1,
-								Content:   strings.TrimSpace(line),
-								ContentId: res.SHA,
-							})
+							ir := models.IntermediateResult{
+								File:        res.Path,
+								RemoteSHA:   res.SHA,
+								CharOffset:  -1,
+								RawFragment: strings.TrimSpace(line),
+								LineNumber:  1,
+							}
+							allResults = append(allResults, ir)
+							if opts.Debug {
+								fmt.Printf("[DEBUG][github] Translated Intermediate: %+v\n", ir)
+							}
 						}
 					}
 				}
 			} else {
-				allResults = append(allResults, backend.SearchResult{
-					File:      res.Path,
-					Line:      1,
-					Content:   "[File match]",
-					ContentId: res.SHA,
-				})
+				ir := models.IntermediateResult{
+					File:        res.Path,
+					RemoteSHA:   res.SHA,
+					CharOffset:  -1,
+					RawFragment: "[File match]",
+					LineNumber:  1,
+				}
+				allResults = append(allResults, ir)
+				if opts.Debug {
+					fmt.Printf("[DEBUG][github] Translated Intermediate: %+v\n", ir)
+				}
 			}
 		}
 		

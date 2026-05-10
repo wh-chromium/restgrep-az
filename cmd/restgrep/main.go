@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/wh-chromium/restgrep-az/internal/backend"
-	"github.com/wh-chromium/restgrep-az/internal/backend/azure"
-	"github.com/wh-chromium/restgrep-az/internal/backend/github"
-	"github.com/wh-chromium/restgrep-az/internal/backend/githubapi"
 	"github.com/wh-chromium/restgrep-az/internal/config"
 	"github.com/wh-chromium/restgrep-az/internal/engine"
+	"github.com/wh-chromium/restgrep-az/internal/frontend/azure"
+	"github.com/wh-chromium/restgrep-az/internal/frontend/github"
+	"github.com/wh-chromium/restgrep-az/internal/frontend/githubapi"
+	"github.com/wh-chromium/restgrep-az/internal/models"
+	"github.com/wh-chromium/restgrep-az/internal/resolver"
 )
 
 func main() {
@@ -19,7 +20,6 @@ func main() {
 	cfg, err := config.Load("restgrep.json")
 	if err != nil {
 		if os.IsNotExist(err) {
-			// Provide a default config if it doesn't exist to make it easier to test
 			cfg = &config.Config{
 				Backends: []config.BackendConfig{
 					{Type: "azure", Organization: "fabrikam", Project: "MyFirstProject", Limit: 100},
@@ -34,38 +34,26 @@ func main() {
 	}
 
 	// 2. Define and parse flags
-	var opts backend.SearchOptions
-	flag.BoolVar(&opts.IgnoreCase, "i", false, "Ignore case distinctions in patterns and input data")
-	flag.BoolVar(&opts.IgnoreCase, "ignore-case", false, "Ignore case distinctions in patterns and input data")
-	flag.BoolVar(&opts.LineNumber, "n", false, "Prefix each line of output with the 1-based line number")
-	flag.BoolVar(&opts.LineNumber, "line-number", false, "Prefix each line of output with the 1-based line number")
-	flag.BoolVar(&opts.Count, "c", false, "Suppress normal output; instead print a count of matching lines for each input file")
-	flag.BoolVar(&opts.Count, "count", false, "Suppress normal output; instead print a count of matching lines for each input file")
-	flag.BoolVar(&opts.FilesWithMatches, "l", false, "Suppress normal output; instead print the name of each input file")
-	flag.BoolVar(&opts.FilesWithMatches, "files-with-matches", false, "Suppress normal output; instead print the name of each input file")
+	var opts models.SearchOptions
+	flag.BoolVar(&opts.IgnoreCase, "i", false, "Ignore case distinctions")
+	flag.BoolVar(&opts.LineNumber, "n", false, "Prefix each line with 1-based line number")
+	flag.BoolVar(&opts.Count, "c", false, "Print a count of matching lines for each file")
+	flag.BoolVar(&opts.FilesWithMatches, "l", false, "Print only names of files with matches")
 	flag.BoolVar(&opts.WordRegexp, "w", false, "Force PATTERN to match only whole words")
-	flag.BoolVar(&opts.WordRegexp, "word-regexp", false, "Force PATTERN to match only whole words")
 	flag.IntVar(&opts.Limit, "m", 0, "Stop after NUM matches")
-	flag.IntVar(&opts.Limit, "max-count", 0, "Stop after NUM matches")
 	flag.IntVar(&opts.AfterContext, "A", 0, "Print NUM lines of trailing context")
-	flag.IntVar(&opts.AfterContext, "after-context", 0, "Print NUM lines of trailing context")
 	flag.IntVar(&opts.BeforeContext, "B", 0, "Print NUM lines of leading context")
-	flag.IntVar(&opts.BeforeContext, "before-context", 0, "Print NUM lines of leading context")
-
+	
 	var contextLines int
-	flag.IntVar(&contextLines, "C", 0, "Print NUM lines of leading and trailing context")
-	flag.IntVar(&contextLines, "context", 0, "Print NUM lines of leading and trailing context")
-	flag.BoolVar(&opts.InexactSHA1Adjustment, "git-diff-inexact-sha1-adjustment", cfg.InexactSHA1Adjustment, "Adjust results using git diff if local SHA1 does not match")
+	flag.IntVar(&contextLines, "C", 0, "Print NUM lines of surrounding context")
+	flag.BoolVar(&opts.InexactSHA1Adjustment, "git-diff-inexact-sha1-adjustment", cfg.InexactSHA1Adjustment, "Use git diff for drift recovery")
+	flag.BoolVar(&opts.Debug, "debug", false, "Show detailed pipeline logs")
 
 	flag.Parse()
 
 	if contextLines > 0 {
-		if opts.AfterContext == 0 {
-			opts.AfterContext = contextLines
-		}
-		if opts.BeforeContext == 0 {
-			opts.BeforeContext = contextLines
-		}
+		if opts.AfterContext == 0 { opts.AfterContext = contextLines }
+		if opts.BeforeContext == 0 { opts.BeforeContext = contextLines }
 	}
 
 	args := flag.Args()
@@ -77,34 +65,60 @@ func main() {
 	query := args[0]
 	opts.Paths = args[1:]
 
-	var backends []engine.EngineBackend
+	// 3. Instantiate Frontends and Resolvers
+	var eFrontends []engine.EngineFrontend
 	for _, bCfg := range cfg.Backends {
 		limit := bCfg.Limit
-		if limit <= 0 {
-			limit = 100
-		}
-		var b backend.Backend
+		if limit <= 0 { limit = 100 }
+
+		var f engine.EngineFrontend
+		f.Limit = limit
+
+		// Frontend type
 		switch bCfg.Type {
 		case "azure":
-			b = azure.New(bCfg.Organization, bCfg.Project)
+			f.Frontend = azure.New(bCfg.Organization, bCfg.Project)
 		case "github":
-			b = github.New(bCfg.Repo)
+			githubBackend := github.New(bCfg.Repo)
+			githubBackend.Executor = &github.RealExecutor{}
+			f.Frontend = githubBackend
 		case "github-api":
-			b = githubapi.New(bCfg.Repo)
+			githubAPIBackend := githubapi.New(bCfg.Repo)
+			githubAPIBackend.Executor = &githubapi.RealExecutor{}
+			f.Frontend = githubAPIBackend
 		default:
-			fmt.Fprintf(os.Stderr, "Unknown backend type: %s\n", bCfg.Type)
+			fmt.Fprintf(os.Stderr, "Unknown frontend type: %s\n", bCfg.Type)
 			continue
 		}
-		backends = append(backends, engine.EngineBackend{
-			Backend: b,
-			Limit:   limit,
-		})
+
+		// Resolver mode
+		mode := bCfg.BackendMode
+		if mode == "" {
+			mode = cfg.BackendMode
+		}
+		if opts.InexactSHA1Adjustment {
+			mode = string(models.ModeGitDiff)
+		}
+		if mode == "" {
+			mode = string(models.ModeLocal)
+		}
+
+		switch models.ResolverMode(mode) {
+		case models.ModeNaive:
+			f.Resolver = &resolver.NaiveResolver{}
+		case models.ModeLocal:
+			f.Resolver = &resolver.LocalNoDiffResolver{}
+		case models.ModeGitDiff:
+			f.Resolver = &resolver.LocalWithDiffResolver{}
+		default:
+			f.Resolver = &resolver.LocalNoDiffResolver{}
+		}
+
+		eFrontends = append(eFrontends, f)
 	}
 
-	eng := engine.New(backends, os.Stdout, os.Stderr, cfg.ExecutionMode)
-
-	ctx := context.Background()
-	if err := eng.Run(ctx, query, opts); err != nil {
+	eng := engine.New(eFrontends, os.Stdout, os.Stderr, cfg.ExecutionMode)
+	if err := eng.Run(context.Background(), query, opts); err != nil {
 		fmt.Fprintf(os.Stderr, "Search failed: %v\n", err)
 		os.Exit(1)
 	}

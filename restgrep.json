@@ -1,10 +1,17 @@
 {
+  "execution_mode": "parallel",
   "backends": [
     {
       "type": "github-api",
       "repo": "wh-chromium/restgrep-az",
-      "limit": 10
+      "limit": 2,
+      "backend_mode": "naive"
+    },
+    {
+      "type": "github",
+      "repo": "wh-chromium/restgrep-az",
+      "limit": 2,
+      "backend_mode": "local"
     }
-  ],
-  "inexact_sha1_adjustment": false
+  ]
 }

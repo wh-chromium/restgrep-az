@@ -1,247 +1,97 @@
 package engine
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha1"
-	"encoding/hex"
 	"fmt"
 	"io"
-	"os"
 	"sort"
-	"strings"
 
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/wh-chromium/restgrep-az/internal/backend"
+	"github.com/wh-chromium/restgrep-az/internal/frontend"
+	"github.com/wh-chromium/restgrep-az/internal/models"
+	"github.com/wh-chromium/restgrep-az/internal/resolver"
 )
 
-type EngineBackend struct {
-	Backend backend.Backend
-	Limit   int
+type EngineFrontend struct {
+	Frontend frontend.Frontend
+	Resolver resolver.Resolver
+	Limit    int
 }
 
 type Engine struct {
-	backends      []EngineBackend
+	frontends     []EngineFrontend
 	out           io.Writer
 	errOut        io.Writer
 	executionMode string // "parallel" or "sequential"
 }
 
-func New(backends []EngineBackend, out io.Writer, errOut io.Writer, mode string) *Engine {
+func New(frontends []EngineFrontend, out io.Writer, errOut io.Writer, mode string) *Engine {
 	if mode == "" {
-		mode = "parallel" // Default
+		mode = "parallel"
 	}
-	return &Engine{backends: backends, out: out, errOut: errOut, executionMode: mode}
+	return &Engine{frontends: frontends, out: out, errOut: errOut, executionMode: mode}
 }
 
-func getGitBlobSHA1(data []byte) string {
-	// Normalize line endings to LF (Git's default internal format)
-	normalized := bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
-	
-	h := sha1.New()
-	h.Write([]byte(fmt.Sprintf("blob %d\x00", len(normalized))))
-	h.Write(normalized)
-	return hex.EncodeToString(h.Sum(nil))
+type frontendResultGroup struct {
+	name     string
+	results  []models.IntermediateResult
+	resolver resolver.Resolver
+	limit    int
+	err      error
 }
 
-func getLineFromOffset(data []byte, charOffset int) (string, int) {
-	line := 1
-	lineStart := 0
-	for i := 0; i < charOffset && i < len(data); i++ {
-		if data[i] == '\n' {
-			line++
-			lineStart = i + 1
-		}
-	}
-	lineEnd := len(data)
-	for i := charOffset; i < len(data); i++ {
-		if data[i] == '\n' || data[i] == '\r' {
-			lineEnd = i
-			break
-		}
-	}
-	return string(data[lineStart:lineEnd]), line
-}
-
-func resolveInexactOffset(remoteSHA string, localData []byte, remoteCharOffset int) (int, bool) {
-	repo, err := git.PlainOpen(".")
-	if err != nil {
-		return 0, false
-	}
-
-	hash := plumbing.NewHash(remoteSHA)
-	blob, err := repo.BlobObject(hash)
-	if err != nil {
-		return 0, false
-	}
-
-	reader, err := blob.Reader()
-	if err != nil {
-		return 0, false
-	}
-	defer reader.Close()
-	remoteData, err := io.ReadAll(reader)
-	if err != nil {
-		return 0, false
-	}
-
-	// To map offset, we use the Diff logic.
-	// This is a simplified version: find the line in remote, and find it in local.
-	remoteLineContent, _ := getLineFromOffset(remoteData, remoteCharOffset)
-	
-	// Try to find the exact line in localData around the same relative position
-	// In a real 'git diff' approach, we would parse hunks, but for 'inexact adjustment',
-	// a fuzzy line search is often what's intended.
-	
-	lines := strings.Split(string(localData), "\n")
-	for i, line := range lines {
-		if strings.Contains(line, remoteLineContent) {
-			// Find character offset of this line
-			offset := 0
-			for j := 0; j < i; j++ {
-				offset += len(lines[j]) + 1
-			}
-			// Add partial offset if possible, or just return start of line
-			return offset, true
-		}
-	}
-
-	return 0, false
-}
-
-type backendResultGroup struct {
-	name    string
-	results []backend.SearchResult
-	limit   int
-	err     error
-}
-
-type enrichedLine struct {
-	text   string
-	number int
-	match  bool
-}
-
-func getLinesWithContext(data []byte, charOffset int, before, after int) []enrichedLine {
-	// 1. Find the match line start and number
-	matchLine := 1
-	lineStart := 0
-	for i := 0; i < charOffset && i < len(data); i++ {
-		if data[i] == '\n' {
-			matchLine++
-			lineStart = i + 1
-		}
-	}
-
-	// Helper to get line end
-	getLineEnd := func(start int) int {
-		for i := start; i < len(data); i++ {
-			if data[i] == '\n' || data[i] == '\r' {
-				return i
-			}
-		}
-		return len(data)
-	}
-
-	// 2. Collect match line
-	matchEnd := getLineEnd(lineStart)
-	lines := []enrichedLine{{text: string(data[lineStart:matchEnd]), number: matchLine, match: true}}
-
-	// 3. Collect "before" context
-	currStart := lineStart
-	for i := 0; i < before; i++ {
-		if currStart <= 0 {
-			break
-		}
-		// Look for start of previous line
-		searchIdx := currStart - 2
-		if searchIdx < 0 {
-			break
-		}
-		prevStart := 0
-		for j := searchIdx; j >= 0; j-- {
-			if data[j] == '\n' {
-				prevStart = j + 1
-				break
-			}
-		}
-		prevEnd := getLineEnd(prevStart)
-		lines = append([]enrichedLine{{text: string(data[prevStart:prevEnd]), number: matchLine - (i + 1), match: false}}, lines...)
-		currStart = prevStart
-	}
-
-	// 4. Collect "after" context
-	currEnd := matchEnd
-	for i := 0; i < after; i++ {
-		if currEnd >= len(data) {
-			break
-		}
-		nextStart := currEnd + 1
-		if nextStart >= len(data) {
-			break
-		}
-		nextEnd := getLineEnd(nextStart)
-		lines = append(lines, enrichedLine{text: string(data[nextStart:nextEnd]), number: matchLine + (i + 1), match: false})
-		currEnd = nextEnd
-	}
-
-	return lines
-}
-
-func (e *Engine) Run(ctx context.Context, query string, opts backend.SearchOptions) error {
-	var resultGroups []backendResultGroup
+func (e *Engine) Run(ctx context.Context, query string, opts models.SearchOptions) error {
+	var groups []frontendResultGroup
 
 	if e.executionMode == "sequential" {
-		for _, eb := range e.backends {
-			b := eb.Backend
+		for _, ef := range e.frontends {
+			f := ef.Frontend
 			currentOpts := opts
 			if currentOpts.Limit <= 0 {
-				currentOpts.Limit = eb.Limit
+				currentOpts.Limit = ef.Limit
 				if currentOpts.Limit <= 0 {
 					currentOpts.Limit = 100
 				}
 			}
 
-			results, err := b.Search(ctx, query, currentOpts)
+			results, err := f.Search(ctx, query, currentOpts)
 			if err == nil {
 				if len(results) > currentOpts.Limit {
 					results = results[:currentOpts.Limit]
 				}
-				resultGroups = append(resultGroups, backendResultGroup{
-					name:    b.Name(),
-					results: results,
-					limit:   currentOpts.Limit,
+				groups = append(groups, frontendResultGroup{
+					name:     f.Name(),
+					results:  results,
+					resolver: ef.Resolver,
+					limit:    currentOpts.Limit,
 				})
-				break // Stop after first successful execution
+				break
 			}
-			fmt.Fprintf(e.errOut, "[%s] Error: %v\n", b.Name(), err)
+			fmt.Fprintf(e.errOut, "[%s] Error: %v\n", f.Name(), err)
 		}
 	} else {
 		// Parallel mode
-		resultGroups = make([]backendResultGroup, len(e.backends))
 		resultsChan := make(chan struct {
 			index int
-			group backendResultGroup
-		}, len(e.backends))
+			group frontendResultGroup
+		}, len(e.frontends))
 
-		for i, eb := range e.backends {
-			go func(idx int, eb EngineBackend) {
-				b := eb.Backend
+		for i, ef := range e.frontends {
+			go func(idx int, ef EngineFrontend) {
+				f := ef.Frontend
 				currentOpts := opts
 				if currentOpts.Limit <= 0 {
-					currentOpts.Limit = eb.Limit
+					currentOpts.Limit = ef.Limit
 					if currentOpts.Limit <= 0 {
 						currentOpts.Limit = 100
 					}
 				}
 
-				results, err := b.Search(ctx, query, currentOpts)
+				results, err := f.Search(ctx, query, currentOpts)
 				if err != nil {
 					resultsChan <- struct {
 						index int
-						group backendResultGroup
-					}{idx, backendResultGroup{name: b.Name(), err: err}}
+						group frontendResultGroup
+					}{idx, frontendResultGroup{name: f.Name(), err: err}}
 					return
 				}
 
@@ -250,114 +100,75 @@ func (e *Engine) Run(ctx context.Context, query string, opts backend.SearchOptio
 				}
 				resultsChan <- struct {
 					index int
-					group backendResultGroup
-				}{idx, backendResultGroup{
-					name:    b.Name(),
-					results: results,
-					limit:   currentOpts.Limit,
+					group frontendResultGroup
+				}{idx, frontendResultGroup{
+					name:     f.Name(),
+					results:  results,
+					resolver: ef.Resolver,
+					limit:    currentOpts.Limit,
 				}}
-			}(i, eb)
+			}(i, ef)
 		}
 
-		for i := 0; i < len(e.backends); i++ {
+		tempGroups := make([]frontendResultGroup, len(e.frontends))
+		for i := 0; i < len(e.frontends); i++ {
 			res := <-resultsChan
-			resultGroups[res.index] = res.group
+			tempGroups[res.index] = res.group
 			if res.group.err != nil {
 				fmt.Fprintf(e.errOut, "[%s] Error: %v\n", res.group.name, res.group.err)
 			}
 		}
 
-		// Filter out failed backends for processing, but maintain order of successes
-		var successfulGroups []backendResultGroup
-		for _, g := range resultGroups {
-			if g.err == nil && g.name != "" { // check name to skip uninitialized if any
-				successfulGroups = append(successfulGroups, g)
+		for _, g := range tempGroups {
+			if g.err == nil && g.name != "" {
+				groups = append(groups, g)
 			}
 		}
-		resultGroups = successfulGroups
 	}
 
-	type searchResultEnriched struct {
-		file      string
-		lines     []enrichedLine
-		content   string // fallback if not local
-		line      int    // fallback if not local
-		contentId string
+	// 2. Map and Flatten for efficient resolution
+	type resultPtr struct {
+		ir           *models.IntermediateResult
+		resolver     resolver.Resolver
+		frontendName string
+		groupIndex   int
+		resultIndex  int
 	}
 
-	// 1. Prepare sortable slice of pointers to original results
-	var allPointers []*backend.SearchResult
-	for bIdx := range resultGroups {
-		for rIdx := range resultGroups[bIdx].results {
-			allPointers = append(allPointers, &resultGroups[bIdx].results[rIdx])
+	var allPtrs []resultPtr
+	for gIdx, g := range groups {
+		for rIdx := range g.results {
+			allPtrs = append(allPtrs, resultPtr{
+				ir:           &g.results[rIdx],
+				resolver:     g.resolver,
+				frontendName: g.name,
+				groupIndex:   gIdx,
+				resultIndex:  rIdx,
+			})
 		}
 	}
 
-	// 2. Sort by filename for 100% cache efficiency during enrichment
-	sort.Slice(allPointers, func(i, j int) bool {
-		if allPointers[i].File != allPointers[j].File {
-			return allPointers[i].File < allPointers[j].File
+	// Sort by filename for MRU efficiency if needed (though we call resolvers one by one now)
+	sort.Slice(allPtrs, func(i, j int) bool {
+		if allPtrs[i].ir.File != allPtrs[j].ir.File {
+			return allPtrs[i].ir.File < allPtrs[j].ir.File
 		}
-		return allPointers[i].CharOffset < allPointers[j].CharOffset
+		return allPtrs[i].ir.CharOffset < allPtrs[j].ir.CharOffset
 	})
 
-	// 3. Result storage with context
-	enrichedResults := make(map[*backend.SearchResult]searchResultEnriched)
-
-	if !opts.Count && !opts.FilesWithMatches {
-		var cachedFile string
-		var cachedData []byte
-		var cachedSHA string
-
-		for _, r := range allPointers {
-			enr := searchResultEnriched{file: r.File, content: r.Content, line: r.Line, contentId: r.ContentId}
-			
-			if r.ContentId != "" {
-				localPath := strings.TrimPrefix(r.File, "/")
-				if localPath != cachedFile {
-					data, err := os.ReadFile(localPath)
-					if err == nil {
-						cachedFile = localPath
-						cachedData = data
-						cachedSHA = getGitBlobSHA1(data)
-					} else {
-						cachedFile = ""
-						cachedData = nil
-						cachedSHA = ""
-						enr.content = fmt.Sprintf("%s (local file not found)", r.Content)
-					}
-				}
-
-				if localPath == cachedFile {
-					if cachedSHA == r.ContentId {
-						enr.lines = getLinesWithContext(cachedData, r.CharOffset, opts.BeforeContext, opts.AfterContext)
-					} else {
-						// SHA1 Mismatch
-						if opts.InexactSHA1Adjustment {
-							newOffset, ok := resolveInexactOffset(r.ContentId, cachedData, r.CharOffset)
-							if ok {
-								enr.lines = getLinesWithContext(cachedData, newOffset, opts.BeforeContext, opts.AfterContext)
-							} else {
-								enr.content = fmt.Sprintf("%s (local file mismatch - inexact adjustment failed)", r.Content)
-							}
-						} else {
-							enr.content = fmt.Sprintf("%s (local file mismatch)", r.Content)
-						}
-					}
-				} else if !strings.Contains(enr.content, "local file not found") {
-					enr.content = fmt.Sprintf("%s (local file not found)", r.Content)
-				}
-			}
-			enrichedResults[r] = enr
-		}
+	// 3. Resolve all
+	finalResults := make(map[*models.IntermediateResult]resolver.Result)
+	for _, p := range allPtrs {
+		res := p.resolver.Resolve(ctx, *p.ir, opts.Debug)
+		finalResults[p.ir] = res
 	}
 
-	// 4. Output grouped by provider
-	for _, group := range resultGroups {
+	// 4. Output grouped by provider (Restore order)
+	for _, g := range groups {
 		if opts.Count {
 			counts := make(map[string]int)
-			for _, r := range group.results {
-				counts[r.File]++
+			for _, ir := range g.results {
+				counts[ir.File]++
 			}
 			var files []string
 			for f := range counts {
@@ -369,55 +180,38 @@ func (e *Engine) Run(ctx context.Context, query string, opts backend.SearchOptio
 			}
 		} else if opts.FilesWithMatches {
 			files := make(map[string]bool)
-			for _, r := range group.results {
-				if !files[r.File] {
-					fmt.Fprintln(e.out, r.File)
-					files[r.File] = true
+			for _, ir := range g.results {
+				if !files[ir.File] {
+					fmt.Fprintln(e.out, ir.File)
+					files[ir.File] = true
 				}
 			}
 		} else {
 			var lastLineNum int
 			var lastFile string
-			for i := range group.results {
-				enr := enrichedResults[&group.results[i]]
-				
-				// Standard grep behavior: print -- separator if there is a gap between matches in the same file
-				// or between different files if context is enabled.
+			for i := range g.results {
+				ir := &g.results[i]
+				res := finalResults[ir]
+
 				if (opts.BeforeContext > 0 || opts.AfterContext > 0) && i > 0 {
-					if enr.file != lastFile || (len(enr.lines) > 0 && enr.lines[0].number > lastLineNum+1) {
+					if res.File != lastFile || (res.Line > lastLineNum+1) {
 						fmt.Fprintln(e.out, "--")
 					}
 				}
 
-				if len(enr.lines) > 0 {
-					for _, el := range enr.lines {
-						sep := ":"
-						if !el.match {
-							sep = "-"
-						}
-						if opts.LineNumber {
-							fmt.Fprintf(e.out, "%s%s%d%s%s\n", enr.file, sep, el.number, sep, el.text)
-						} else {
-							fmt.Fprintf(e.out, "%s%s%s\n", enr.file, sep, el.text)
-						}
-						lastLineNum = el.number
-					}
-				} else {
-					// Fallback to stub
-					if opts.LineNumber {
-						fmt.Fprintf(e.out, "%s:%d:%s\n", enr.file, enr.line, enr.content)
-					} else {
-						fmt.Fprintf(e.out, "%s:%s\n", enr.file, enr.content)
-					}
-					lastLineNum = enr.line
+				output := fmt.Sprintf("%s:%d:%s", res.File, res.Line, res.Content)
+				if res.Message != "" {
+					output += " " + res.Message
 				}
-				lastFile = enr.file
+				fmt.Fprintln(e.out, output)
+				
+				lastLineNum = res.Line
+				lastFile = res.File
 			}
 		}
 
-		// Status reporting
-		status := fmt.Sprintf("[%s] Showing %d results (limit: %d).", group.name, len(group.results), group.limit)
-		if len(group.results) >= group.limit {
+		status := fmt.Sprintf("[%s] Showing %d results (limit: %d).", g.name, len(g.results), g.limit)
+		if len(g.results) >= g.limit {
 			status += " Limit reached, there might be more results."
 		}
 		fmt.Fprintln(e.out, status)
@@ -425,7 +219,3 @@ func (e *Engine) Run(ctx context.Context, query string, opts backend.SearchOptio
 
 	return nil
 }
-
-
-
-

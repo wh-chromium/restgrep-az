@@ -5,11 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os/exec"
 	"strings"
 
-	"github.com/wh-chromium/restgrep-az/internal/backend"
+	"github.com/wh-chromium/restgrep-az/internal/models"
 )
 
 type Backend struct {
@@ -53,10 +54,10 @@ type SearchRequest struct {
 type SearchResponse struct {
 	Count   int `json:"count"`
 	Results []struct {
-		FileName string `json:"fileName"`
-		Path     string `json:"path"`
+		FileName  string `json:"fileName"`
+		Path      string `json:"path"`
 		ContentId string `json:"contentId"`
-		Matches  struct {
+		Matches   struct {
 			Content []struct {
 				CharOffset int `json:"charOffset"`
 				Length     int `json:"length"`
@@ -65,7 +66,7 @@ type SearchResponse struct {
 	} `json:"results"`
 }
 
-func (b *Backend) Search(ctx context.Context, query string, opts backend.SearchOptions) ([]backend.SearchResult, error) {
+func (b *Backend) Search(ctx context.Context, query string, opts models.SearchOptions) ([]models.IntermediateResult, error) {
 	token, err := b.TokenFetcher(ctx)
 	if err != nil {
 		return nil, err
@@ -112,6 +113,11 @@ func (b *Backend) Search(ctx context.Context, query string, opts backend.SearchO
 		return nil, err
 	}
 
+	if opts.Debug {
+		fmt.Printf("[DEBUG][azure] Outgoing POST: %s\n", url)
+		fmt.Printf("[DEBUG][azure] Body: %s\n", string(bodyBytes))
+	}
+
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, err
@@ -126,6 +132,14 @@ func (b *Backend) Search(ctx context.Context, query string, opts backend.SearchO
 	}
 	defer resp.Body.Close()
 
+	var respBody []byte
+	if opts.Debug {
+		respBody, _ = io.ReadAll(resp.Body)
+		fmt.Printf("[DEBUG][azure] Response Status: %d\n", resp.StatusCode)
+		fmt.Printf("[DEBUG][azure] Response Body: %s\n", string(respBody))
+		resp.Body = io.NopCloser(bytes.NewBuffer(respBody))
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
@@ -135,28 +149,36 @@ func (b *Backend) Search(ctx context.Context, query string, opts backend.SearchO
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	var results []backend.SearchResult
+	var results []models.IntermediateResult
 	for _, res := range searchResp.Results {
 		if len(res.Matches.Content) > 0 {
 			for _, match := range res.Matches.Content {
-				results = append(results, backend.SearchResult{
-					File:       res.Path,
-					Line:       1, // Line numbers would require fetching file content
-					Content:    fmt.Sprintf("[Match at char offset %d, length %d]", match.CharOffset, match.Length),
-					ContentId:  res.ContentId,
-					CharOffset: match.CharOffset,
-					Length:     match.Length,
+				results = append(results, models.IntermediateResult{
+					File:        res.Path,
+					RemoteSHA:   res.ContentId,
+					CharOffset:  match.CharOffset,
+					Length:      match.Length,
+					RawFragment: fmt.Sprintf("[Match at char offset %d, length %d]", match.CharOffset, match.Length),
+					LineNumber:  1,
 				})
 			}
 		} else {
-			results = append(results, backend.SearchResult{
-				File:      res.Path,
-				Line:      1,
-				Content:   "[File match]",
-				ContentId: res.ContentId,
+			results = append(results, models.IntermediateResult{
+				File:        res.Path,
+				RemoteSHA:   res.ContentId,
+				CharOffset:  -1,
+				RawFragment: "[File match]",
+				LineNumber:  1,
 			})
+		}
+	}
+
+	if opts.Debug {
+		for _, r := range results {
+			fmt.Printf("[DEBUG][azure] Translated Intermediate: %+v\n", r)
 		}
 	}
 
 	return results, nil
 }
+
