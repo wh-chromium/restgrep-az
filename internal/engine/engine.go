@@ -95,9 +95,14 @@ func (e *Engine) Run(ctx context.Context, query string, opts backend.SearchOptio
 		}
 	} else {
 		// Parallel mode
-		resultsChan := make(chan backendResultGroup, len(e.backends))
-		for _, eb := range e.backends {
-			go func(eb EngineBackend) {
+		resultGroups = make([]backendResultGroup, len(e.backends))
+		resultsChan := make(chan struct {
+			index int
+			group backendResultGroup
+		}, len(e.backends))
+
+		for i, eb := range e.backends {
+			go func(idx int, eb EngineBackend) {
 				b := eb.Backend
 				currentOpts := opts
 				if currentOpts.Limit <= 0 {
@@ -109,114 +114,160 @@ func (e *Engine) Run(ctx context.Context, query string, opts backend.SearchOptio
 
 				results, err := b.Search(ctx, query, currentOpts)
 				if err != nil {
-					resultsChan <- backendResultGroup{name: b.Name(), err: err}
+					resultsChan <- struct {
+						index int
+						group backendResultGroup
+					}{idx, backendResultGroup{name: b.Name(), err: err}}
 					return
 				}
 
 				if len(results) > currentOpts.Limit {
 					results = results[:currentOpts.Limit]
 				}
-				resultsChan <- backendResultGroup{
+				resultsChan <- struct {
+					index int
+					group backendResultGroup
+				}{idx, backendResultGroup{
 					name:    b.Name(),
 					results: results,
 					limit:   currentOpts.Limit,
-				}
-			}(eb)
+				}}
+			}(i, eb)
 		}
 
 		for i := 0; i < len(e.backends); i++ {
-			group := <-resultsChan
-			if group.err == nil {
-				resultGroups = append(resultGroups, group)
-			} else {
-				fmt.Fprintf(e.errOut, "[%s] Error: %v\n", group.name, group.err)
+			res := <-resultsChan
+			resultGroups[res.index] = res.group
+			if res.group.err != nil {
+				fmt.Fprintf(e.errOut, "[%s] Error: %v\n", res.group.name, res.group.err)
 			}
 		}
-	}
 
-	// 1. Flatten all results
-	var allResults []backend.SearchResult
-	for _, group := range resultGroups {
-		allResults = append(allResults, group.results...)
-	}
-
-	// 2. Sort by filename (ensures 100% cache efficiency)
-	sort.Slice(allResults, func(i, j int) bool {
-		if allResults[i].File != allResults[j].File {
-			return allResults[i].File < allResults[j].File
+		// Filter out failed backends for processing, but maintain order of successes
+		var successfulGroups []backendResultGroup
+		for _, g := range resultGroups {
+			if g.err == nil && g.name != "" { // check name to skip uninitialized if any
+				successfulGroups = append(successfulGroups, g)
+			}
 		}
-		return allResults[i].CharOffset < allResults[j].CharOffset
+		resultGroups = successfulGroups
+	}
+
+	// 1. Prepare sortable wrapper to track original order
+	type sortableResult struct {
+		res          *backend.SearchResult
+		backendIndex int
+		resultIndex  int
+		backendName  string
+		backendLimit int
+	}
+
+	var allResults []sortableResult
+	for bIdx, group := range resultGroups {
+		for rIdx := range group.results {
+			allResults = append(allResults, sortableResult{
+				res:          &group.results[rIdx],
+				backendIndex: bIdx,
+				resultIndex:  rIdx,
+				backendName:  group.name,
+				backendLimit: group.limit,
+			})
+		}
+	}
+
+	// 2. Sort by filename for 100% cache efficiency during enrichment
+	sort.Slice(allResults, func(i, j int) bool {
+		if allResults[i].res.File != allResults[j].res.File {
+			return allResults[i].res.File < allResults[j].res.File
+		}
+		return allResults[i].res.CharOffset < allResults[j].res.CharOffset
 	})
 
-	// 3. Process merged results (MRU Enrichment)
+	// 3. Process enrichment (MRU Cache)
 	var cachedFile string
 	var cachedData []byte
 	var cachedSHA string
 
-	if opts.Count {
-		counts := make(map[string]int)
-		for _, r := range allResults {
-			counts[r.File]++
-		}
-		// Print counts in sorted order
-		var files []string
-		for f := range counts {
-			files = append(files, f)
-		}
-		sort.Strings(files)
-		for _, f := range files {
-			fmt.Fprintf(e.out, "%s:%d\n", f, counts[f])
-		}
-	} else if opts.FilesWithMatches {
-		var lastFile string
-		for _, r := range allResults {
-			if r.File != lastFile {
-				fmt.Fprintln(e.out, r.File)
-				lastFile = r.File
-			}
-		}
-	} else {
-		for _, r := range allResults {
-			content := r.Content
-			line := r.Line
-
-			if r.ContentId != "" {
-				localPath := strings.TrimPrefix(r.File, "/")
-				if localPath != cachedFile {
-					data, err := os.ReadFile(localPath)
-					if err == nil {
-						cachedFile = localPath
-						cachedData = data
-						cachedSHA = getGitBlobSHA1(data)
-					} else {
-						cachedFile = ""
-						cachedData = nil
-						cachedSHA = ""
-						content = fmt.Sprintf("%s (local file not found)", r.Content)
-					}
-				}
-
-				if localPath == cachedFile {
-					if cachedSHA == r.ContentId {
-						content, line = getLineFromOffset(cachedData, r.CharOffset)
-					} else {
-						content = fmt.Sprintf("%s (local file mismatch)", r.Content)
-					}
-				} else if !strings.Contains(content, "local file not found") {
-					content = fmt.Sprintf("%s (local file not found)", r.Content)
+	for i := range allResults {
+		r := allResults[i].res
+		if r.ContentId != "" {
+			localPath := strings.TrimPrefix(r.File, "/")
+			if localPath != cachedFile {
+				data, err := os.ReadFile(localPath)
+				if err == nil {
+					cachedFile = localPath
+					cachedData = data
+					cachedSHA = getGitBlobSHA1(data)
+				} else {
+					cachedFile = ""
+					cachedData = nil
+					cachedSHA = ""
+					r.Content = fmt.Sprintf("%s (local file not found)", r.Content)
 				}
 			}
 
-			if opts.LineNumber {
-				fmt.Fprintf(e.out, "%s:%d:%s\n", r.File, line, content)
-			} else {
-				fmt.Fprintf(e.out, "%s:%s\n", r.File, content)
+			if localPath == cachedFile {
+				if cachedSHA == r.ContentId {
+					r.Content, r.Line = getLineFromOffset(cachedData, r.CharOffset)
+				} else {
+					r.Content = fmt.Sprintf("%s (local file mismatch)", r.Content)
+				}
+			} else if !strings.Contains(r.Content, "local file not found") {
+				r.Content = fmt.Sprintf("%s (local file not found)", r.Content)
 			}
 		}
 	}
 
-	// 4. Final status reporting
-	for _, group := range resultGroups {
+	// 4. Re-sort to restore original provider-based order
+	sort.Slice(allResults, func(i, j int) bool {
+		if allResults[i].backendIndex != allResults[j].backendIndex {
+			return allResults[i].backendIndex < allResults[j].backendIndex
+		}
+		return allResults[i].resultIndex < allResults[j].resultIndex
+	})
+
+	// 5. Output grouped by provider
+	for bIdx, group := range resultGroups {
+		if opts.Count {
+			counts := make(map[string]int)
+			for _, sr := range allResults {
+				if sr.backendIndex == bIdx {
+					counts[sr.res.File]++
+				}
+			}
+			// Print counts for this provider in filename order
+			var files []string
+			for f := range counts {
+				files = append(files, f)
+			}
+			sort.Strings(files)
+			for _, f := range files {
+				fmt.Fprintf(e.out, "%s:%d\n", f, counts[f])
+			}
+		} else if opts.FilesWithMatches {
+			files := make(map[string]bool)
+			for _, sr := range allResults {
+				if sr.backendIndex == bIdx {
+					if !files[sr.res.File] {
+						fmt.Fprintln(e.out, sr.res.File)
+						files[sr.res.File] = true
+					}
+				}
+			}
+		} else {
+			for _, sr := range allResults {
+				if sr.backendIndex == bIdx {
+					r := sr.res
+					if opts.LineNumber {
+						fmt.Fprintf(e.out, "%s:%d:%s\n", r.File, r.Line, r.Content)
+					} else {
+						fmt.Fprintf(e.out, "%s:%s\n", r.File, r.Content)
+					}
+				}
+			}
+		}
+
+		// Per-provider status reporting
 		status := fmt.Sprintf("[%s] Showing %d results (limit: %d).", group.name, len(group.results), group.limit)
 		if len(group.results) >= group.limit {
 			status += " Limit reached, there might be more results."

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -83,6 +84,38 @@ func TestEngineExecutionStrategies(t *testing.T) {
 		}
 		if !strings.Contains(output, "[fail] Error: forced failure") {
 			t.Errorf("Sequential mode did not report error: %s", output)
+		}
+	})
+
+	t.Run("Parallel Mode: Grouping by Provider", func(t *testing.T) {
+		var buf bytes.Buffer
+		// Both backends find matches in the same file "shared.txt"
+		b1 := &mockStrategyBackend{name: "azure", results: []backend.SearchResult{{File: "shared.txt", ContentId: "sha", CharOffset: 0, Content: "azure-hit"}}}
+		b2 := &mockStrategyBackend{name: "github", results: []backend.SearchResult{{File: "shared.txt", ContentId: "sha", CharOffset: 0, Content: "github-hit"}}}
+		
+		backends := []EngineBackend{
+			{Backend: b1, Limit: 10},
+			{Backend: b2, Limit: 10},
+		}
+		eng := New(backends, &buf, &buf, "parallel")
+
+		// Create the local file so enrichment happens
+		content := "local content\n"
+		os.WriteFile("shared.txt", []byte(content), 0644)
+		defer os.Remove("shared.txt")
+
+		err := eng.Run(context.Background(), "query", backend.SearchOptions{})
+		if err != nil {
+			t.Fatalf("Run failed: %v", err)
+		}
+
+		output := buf.String()
+		// Verify azure results come before github results because of backendIndex sort
+		azureIdx := strings.Index(output, "[azure]")
+		githubIdx := strings.Index(output, "[github]")
+		
+		if azureIdx > githubIdx {
+			t.Errorf("Results not grouped by provider correctly. Azure should come before GitHub. Output:\n%s", output)
 		}
 	})
 }
