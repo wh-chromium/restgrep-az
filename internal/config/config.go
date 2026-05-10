@@ -14,7 +14,8 @@ type BackendConfig struct {
 }
 
 type Config struct {
-	Backends []BackendConfig `json:"backends"`
+	Backends      []BackendConfig `json:"backends"`
+	ExecutionMode string          `json:"execution_mode,omitempty"` // "parallel" or "sequential"
 }
 
 func Load(path string) (*Config, error) {

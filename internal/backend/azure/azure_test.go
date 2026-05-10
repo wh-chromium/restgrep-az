@@ -146,7 +146,7 @@ func TestAzureSearch(t *testing.T) {
 				Backend: b,
 				Limit:   tt.opts.Limit,
 			}
-			eng := engine.New([]engine.EngineBackend{eb}, &buf)
+			eng := engine.New([]engine.EngineBackend{eb}, &buf, "parallel")
 
 			err := eng.Run(context.Background(), tt.query, tt.opts)
 			if err != nil {

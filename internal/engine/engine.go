@@ -18,12 +18,16 @@ type EngineBackend struct {
 }
 
 type Engine struct {
-	backends []EngineBackend
-	out      io.Writer
+	backends      []EngineBackend
+	out           io.Writer
+	executionMode string // "parallel" or "sequential"
 }
 
-func New(backends []EngineBackend, out io.Writer) *Engine {
-	return &Engine{backends: backends, out: out}
+func New(backends []EngineBackend, out io.Writer, mode string) *Engine {
+	if mode == "" {
+		mode = "parallel" // Default
+	}
+	return &Engine{backends: backends, out: out, executionMode: mode}
 }
 
 func getGitBlobSHA1(data []byte) string {
@@ -52,30 +56,89 @@ func getLineFromOffset(data []byte, charOffset int) (string, int) {
 	return string(data[lineStart:lineEnd]), line
 }
 
+type backendResultGroup struct {
+	name    string
+	results []backend.SearchResult
+	limit   int
+	err     error
+}
+
 func (e *Engine) Run(ctx context.Context, query string, opts backend.SearchOptions) error {
-	for _, eb := range e.backends {
-		b := eb.Backend
-		currentOpts := opts
-		if currentOpts.Limit <= 0 {
-			currentOpts.Limit = eb.Limit
+	var resultGroups []backendResultGroup
+
+	if e.executionMode == "sequential" {
+		for _, eb := range e.backends {
+			b := eb.Backend
+			currentOpts := opts
 			if currentOpts.Limit <= 0 {
-				currentOpts.Limit = 100
+				currentOpts.Limit = eb.Limit
+				if currentOpts.Limit <= 0 {
+					currentOpts.Limit = 100
+				}
+			}
+
+			results, err := b.Search(ctx, query, currentOpts)
+			if err == nil {
+				if len(results) > currentOpts.Limit {
+					results = results[:currentOpts.Limit]
+				}
+				resultGroups = append(resultGroups, backendResultGroup{
+					name:    b.Name(),
+					results: results,
+					limit:   currentOpts.Limit,
+				})
+				break // Stop after first successful execution
 			}
 		}
+	} else {
+		// Parallel mode
+		resultsChan := make(chan backendResultGroup, len(e.backends))
+		for _, eb := range e.backends {
+			go func(eb EngineBackend) {
+				b := eb.Backend
+				currentOpts := opts
+				if currentOpts.Limit <= 0 {
+					currentOpts.Limit = eb.Limit
+					if currentOpts.Limit <= 0 {
+						currentOpts.Limit = 100
+					}
+				}
 
-		results, err := b.Search(ctx, query, currentOpts)
-		if err != nil {
-			return fmt.Errorf("backend %s failed: %w", b.Name(), err)
+				results, err := b.Search(ctx, query, currentOpts)
+				if err != nil {
+					resultsChan <- backendResultGroup{name: b.Name(), err: err}
+					return
+				}
+
+				if len(results) > currentOpts.Limit {
+					results = results[:currentOpts.Limit]
+				}
+				resultsChan <- backendResultGroup{
+					name:    b.Name(),
+					results: results,
+					limit:   currentOpts.Limit,
+				}
+			}(eb)
 		}
 
-		if len(results) > currentOpts.Limit {
-			results = results[:currentOpts.Limit]
+		for i := 0; i < len(e.backends); i++ {
+			group := <-resultsChan
+			if group.err == nil {
+				resultGroups = append(resultGroups, group)
+			}
+			// We ignore failed backends in parallel mode as requested
 		}
-		
+	}
+
+	// 2. Process all collected results (MRU Enrichment)
+	var cachedFile string
+	var cachedData []byte
+	var cachedSHA string
+
+	for _, group := range resultGroups {
 		if opts.Count {
-			// group by file
 			counts := make(map[string]int)
-			for _, r := range results {
+			for _, r := range group.results {
 				counts[r.File]++
 			}
 			for file, count := range counts {
@@ -83,32 +146,26 @@ func (e *Engine) Run(ctx context.Context, query string, opts backend.SearchOptio
 			}
 		} else if opts.FilesWithMatches {
 			files := make(map[string]bool)
-			for _, r := range results {
+			for _, r := range group.results {
 				if !files[r.File] {
 					fmt.Fprintln(e.out, r.File)
 					files[r.File] = true
 				}
 			}
 		} else {
-			var cachedFile string
-			var cachedData []byte
-			var cachedSHA string
-
-			for _, r := range results {
+			for _, r := range group.results {
 				content := r.Content
 				line := r.Line
 
 				if r.ContentId != "" {
 					localPath := strings.TrimPrefix(r.File, "/")
 					if localPath != cachedFile {
-						// Cache miss: read new file
 						data, err := os.ReadFile(localPath)
 						if err == nil {
 							cachedFile = localPath
 							cachedData = data
 							cachedSHA = getGitBlobSHA1(data)
 						} else {
-							// Reset cache on failure
 							cachedFile = ""
 							cachedData = nil
 							cachedSHA = ""
@@ -116,7 +173,6 @@ func (e *Engine) Run(ctx context.Context, query string, opts backend.SearchOptio
 						}
 					}
 
-					// Use cached data if path matches
 					if localPath == cachedFile {
 						if cachedSHA == r.ContentId {
 							content, line = getLineFromOffset(cachedData, r.CharOffset)
@@ -124,7 +180,6 @@ func (e *Engine) Run(ctx context.Context, query string, opts backend.SearchOptio
 							content = fmt.Sprintf("%s (local file mismatch)", r.Content)
 						}
 					} else if !strings.Contains(content, "local file not found") {
-						// If we didn't just set 'not found' above, and path doesn't match, it was a miss
 						content = fmt.Sprintf("%s (local file not found)", r.Content)
 					}
 				}
@@ -137,13 +192,14 @@ func (e *Engine) Run(ctx context.Context, query string, opts backend.SearchOptio
 			}
 		}
 
-		// Report limit status
-		status := fmt.Sprintf("[%s] Showing %d results (limit: %d).", b.Name(), len(results), currentOpts.Limit)
-		if len(results) >= currentOpts.Limit {
+		// Status reporting
+		status := fmt.Sprintf("[%s] Showing %d results (limit: %d).", group.name, len(group.results), group.limit)
+		if len(group.results) >= group.limit {
 			status += " Limit reached, there might be more results."
 		}
 		fmt.Fprintln(e.out, status)
 	}
+
 	return nil
 }
 

@@ -44,9 +44,30 @@ The GitHub API backend uses `gh api` to call the `/search/code` endpoint directl
 
 ### Settings Configuration
 
-The settings file must configure the organization and default project for Azure, or the repository target for GitHub. `restgrep` iterates and merges outputs from all configured backends!
+The settings file (`restgrep.json`) configures the backends and the execution strategy.
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `backends` | Array | List of search backends to use. |
+| `execution_mode` | String | `parallel` (default) or `sequential`. |
+
+#### Execution Modes
+
+1.  **Parallel Mode (`parallel`)**:
+    - Executes all backends simultaneously.
+    - Waits for all backends to return results.
+    - Merges results from all successful backends.
+    - **Ignores failed backends** (e.g., if one API is down, you still get results from others).
+    - **Optimization**: Performs local file enrichment (MRU cache) **after** all remote results are collected.
+
+2.  **Sequential Fallback Mode (`sequential`)**:
+    - Executes backends one-by-one in the order they are listed.
+    - **Stops after the first successful execution** (even if results are empty).
+    - Useful for prioritizing a fast internal API and falling back to a broader public API only if necessary.
+
 ```json
 {
+  "execution_mode": "parallel",
   "backends": [
     {
       "type": "azure",

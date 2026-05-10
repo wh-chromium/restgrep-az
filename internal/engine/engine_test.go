@@ -191,7 +191,7 @@ func TestEngineLocalResolutionWithCache(t *testing.T) {
 
 	var buf bytes.Buffer
 	eb := EngineBackend{Backend: mockB, Limit: 10}
-	eng := New([]EngineBackend{eb}, &buf)
+	eng := New([]EngineBackend{eb}, &buf, "parallel")
 
 	// 3. Run engine
 	if err := eng.Run(context.Background(), "unused", backend.SearchOptions{}); err != nil {
@@ -325,7 +325,7 @@ src/base/strings/string_util.cc:}  // namespace base
 				Backend: mockBackend,
 				Limit:   tt.opts.Limit,
 			}
-			eng := New([]EngineBackend{eb}, &buf)
+			eng := New([]EngineBackend{eb}, &buf, "parallel")
 
 			err := eng.Run(context.Background(), tt.query, tt.opts)
 			if err != nil {

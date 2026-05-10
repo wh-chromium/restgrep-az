@@ -49,6 +49,7 @@ func main() {
 				Backends: []config.BackendConfig{
 					{Type: "azure", Organization: "fabrikam", Project: "MyFirstProject", Limit: 100},
 				},
+				ExecutionMode: "parallel",
 			}
 		} else {
 			fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
@@ -80,7 +81,7 @@ func main() {
 		})
 	}
 
-	eng := engine.New(backends, os.Stdout)
+	eng := engine.New(backends, os.Stdout, cfg.ExecutionMode)
 
 	ctx := context.Background()
 	if err := eng.Run(ctx, query, opts); err != nil {
