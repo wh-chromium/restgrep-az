@@ -58,6 +58,23 @@ restgrep -c "Controller"
 /BaseController.cs:1
 ```
 
+## Context Control (-A, -B, -C)
+
+`restgrep` leverages local file resolution to provide surrounding context, even if the remote API doesn't. 
+
+**If the file is local and SHA1 matches:**
+
+```bash
+restgrep -C 1 "CodeSearchController"
+```
+**Output:**
+```text
+src/controllers/CodeSearchController.cs-11-using System;
+src/controllers/CodeSearchController.cs:12:public class CodeSearchController : Controller {
+src/controllers/CodeSearchController.cs-13-    private readonly ISearchService _searchService;
+```
+*(Note: Context lines use `-` as a separator, while the match line uses `:`.)*
+
 ### Showing Only Filenames (`-l`)
 
 ```bash

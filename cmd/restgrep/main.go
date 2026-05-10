@@ -28,8 +28,25 @@ func main() {
 	flag.BoolVar(&opts.WordRegexp, "word-regexp", false, "Force PATTERN to match only whole words")
 	flag.IntVar(&opts.Limit, "m", 0, "Stop after NUM matches")
 	flag.IntVar(&opts.Limit, "max-count", 0, "Stop after NUM matches")
+	flag.IntVar(&opts.AfterContext, "A", 0, "Print NUM lines of trailing context")
+	flag.IntVar(&opts.AfterContext, "after-context", 0, "Print NUM lines of trailing context")
+	flag.IntVar(&opts.BeforeContext, "B", 0, "Print NUM lines of leading context")
+	flag.IntVar(&opts.BeforeContext, "before-context", 0, "Print NUM lines of leading context")
+	
+	var contextLines int
+	flag.IntVar(&contextLines, "C", 0, "Print NUM lines of leading and trailing context")
+	flag.IntVar(&contextLines, "context", 0, "Print NUM lines of leading and trailing context")
 
 	flag.Parse()
+
+	if contextLines > 0 {
+		if opts.AfterContext == 0 {
+			opts.AfterContext = contextLines
+		}
+		if opts.BeforeContext == 0 {
+			opts.BeforeContext = contextLines
+		}
+	}
 
 	args := flag.Args()
 	if len(args) < 1 {

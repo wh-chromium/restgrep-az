@@ -12,6 +12,8 @@ type SearchOptions struct {
 	WordRegexp       bool
 	Limit            int
 	Paths            []string
+	AfterContext     int
+	BeforeContext    int
 }
 
 type SearchResult struct {

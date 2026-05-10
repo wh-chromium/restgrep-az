@@ -206,6 +206,90 @@ func TestEngineLocalResolutionWithCache(t *testing.T) {
 	}
 }
 
+func TestEngineContextExtraction(t *testing.T) {
+	// 1. Create a temporary file with several lines
+	content := "line 1\nline 2\nline 3\nMATCH\nline 5\nline 6\nline 7\n"
+	tmpFile, _ := os.CreateTemp("", "restgrep_ctx_*.txt")
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Write([]byte(content))
+	tmpFile.Close()
+
+	sha := getGitBlobSHA1([]byte(content))
+	fileName := tmpFile.Name()
+
+	// "MATCH" is at char offset 21 (6+1 + 6+1 + 6+1)
+	matchOffset := 21
+
+	mockB := &mockGenericBackend{
+		name: "test-ctx",
+		results: []backend.SearchResult{
+			{
+				File:       fileName,
+				ContentId:  sha,
+				CharOffset: matchOffset,
+				Content:    "MATCH",
+			},
+		},
+	}
+
+	tests := []struct {
+		name     string
+		opts     backend.SearchOptions
+		expected string
+	}{
+		{
+			name: "After Context (-A 1)",
+			opts: backend.SearchOptions{AfterContext: 1},
+			expected: fmt.Sprintf("%s:MATCH\n%s-line 5\n", fileName, fileName),
+		},
+		{
+			name: "Before Context (-B 1)",
+			opts: backend.SearchOptions{BeforeContext: 1},
+			expected: fmt.Sprintf("%s-line 3\n%s:MATCH\n", fileName, fileName),
+		},
+		{
+			name: "Full Context (-C 1)",
+			opts: backend.SearchOptions{BeforeContext: 1, AfterContext: 1},
+			expected: fmt.Sprintf("%s-line 3\n%s:MATCH\n%s-line 5\n", fileName, fileName, fileName),
+		},
+		{
+			name: "Full Context with line numbers (-C 1 -n)",
+			opts: backend.SearchOptions{BeforeContext: 1, AfterContext: 1, LineNumber: true},
+			expected: fmt.Sprintf("%s-3-line 3\n%s:4:MATCH\n%s-5-line 5\n", fileName, fileName, fileName),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			eb := EngineBackend{Backend: mockB, Limit: 10}
+			eng := New([]EngineBackend{eb}, &buf, &buf, "parallel")
+
+			if err := eng.Run(context.Background(), "MATCH", tt.opts); err != nil {
+				t.Fatalf("Run failed: %v", err)
+			}
+
+			// Extract results from output (ignoring status line)
+			output := buf.String()
+			lines := strings.Split(strings.TrimSpace(output), "\n")
+			var resultLines []string
+			for _, line := range lines {
+				if !strings.Contains(line, "Showing") {
+					resultLines = append(resultLines, line)
+				}
+			}
+			actualResults := strings.Join(resultLines, "\n")
+			if len(resultLines) > 0 {
+				actualResults += "\n"
+			}
+
+			if actualResults != tt.expected {
+				t.Errorf("expected:\n%q\ngot:\n%q", tt.expected, actualResults)
+			}
+		})
+	}
+}
+
 type mockGenericBackend struct {
 	name    string
 	results []backend.SearchResult
