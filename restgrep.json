@@ -4,11 +4,7 @@
       "type": "github",
       "repo": "chromium/chromium",
       "limit": 5
-    },
-    {
-      "type": "github-api",
-      "repo": "chromium/chromium",
-      "limit": 5
     }
-  ]
+  ],
+  "inexact_sha1_adjustment": true
 }

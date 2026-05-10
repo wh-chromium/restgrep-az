@@ -50,6 +50,7 @@ The settings file (`restgrep.json`) configures the backends and the execution st
 | :--- | :--- | :--- |
 | `backends` | Array | List of search backends to use. |
 | `execution_mode` | String | `parallel` (default) or `sequential`. |
+| `inexact_sha1_adjustment` | Boolean | If `true`, enables automatic Git-diff adjustment by default. |
 
 #### Execution Modes
 

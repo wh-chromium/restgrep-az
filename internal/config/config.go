@@ -14,8 +14,9 @@ type BackendConfig struct {
 }
 
 type Config struct {
-	Backends      []BackendConfig `json:"backends"`
-	ExecutionMode string          `json:"execution_mode,omitempty"` // "parallel" or "sequential"
+	Backends              []BackendConfig `json:"backends"`
+	ExecutionMode         string          `json:"execution_mode,omitempty"`           // "parallel" or "sequential"
+	InexactSHA1Adjustment bool            `json:"inexact_sha1_adjustment,omitempty"`
 }
 
 func Load(path string) (*Config, error) {

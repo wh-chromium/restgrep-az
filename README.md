@@ -42,7 +42,8 @@ go build -o restgrep.exe cmd/restgrep/main.go
       "repo": "chromium/chromium",
       "limit": 10
     }
-  ]
+  ],
+  "inexact_sha1_adjustment": true
 }
 ```
 

@@ -15,6 +15,25 @@ import (
 )
 
 func main() {
+	// 1. Load configuration first to use as defaults
+	cfg, err := config.Load("restgrep.json")
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Provide a default config if it doesn't exist to make it easier to test
+			cfg = &config.Config{
+				Backends: []config.BackendConfig{
+					{Type: "azure", Organization: "fabrikam", Project: "MyFirstProject", Limit: 100},
+				},
+				ExecutionMode:         "parallel",
+				InexactSHA1Adjustment: false,
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	// 2. Define and parse flags
 	var opts backend.SearchOptions
 	flag.BoolVar(&opts.IgnoreCase, "i", false, "Ignore case distinctions in patterns and input data")
 	flag.BoolVar(&opts.IgnoreCase, "ignore-case", false, "Ignore case distinctions in patterns and input data")
@@ -32,11 +51,11 @@ func main() {
 	flag.IntVar(&opts.AfterContext, "after-context", 0, "Print NUM lines of trailing context")
 	flag.IntVar(&opts.BeforeContext, "B", 0, "Print NUM lines of leading context")
 	flag.IntVar(&opts.BeforeContext, "before-context", 0, "Print NUM lines of leading context")
-	
+
 	var contextLines int
 	flag.IntVar(&contextLines, "C", 0, "Print NUM lines of leading and trailing context")
 	flag.IntVar(&contextLines, "context", 0, "Print NUM lines of leading and trailing context")
-	flag.BoolVar(&opts.InexactSHA1Adjustment, "git-diff-inexact-sha1-adjustment", false, "Adjust results using git diff if local SHA1 does not match")
+	flag.BoolVar(&opts.InexactSHA1Adjustment, "git-diff-inexact-sha1-adjustment", cfg.InexactSHA1Adjustment, "Adjust results using git diff if local SHA1 does not match")
 
 	flag.Parse()
 
@@ -57,23 +76,6 @@ func main() {
 
 	query := args[0]
 	opts.Paths = args[1:]
-
-	// Load configuration
-	cfg, err := config.Load("restgrep.json")
-	if err != nil {
-		if os.IsNotExist(err) {
-			// Provide a default config if it doesn't exist to make it easier to test
-			cfg = &config.Config{
-				Backends: []config.BackendConfig{
-					{Type: "azure", Organization: "fabrikam", Project: "MyFirstProject", Limit: 100},
-				},
-				ExecutionMode: "parallel",
-			}
-		} else {
-			fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
-			os.Exit(1)
-		}
-	}
 
 	var backends []engine.EngineBackend
 	for _, bCfg := range cfg.Backends {
