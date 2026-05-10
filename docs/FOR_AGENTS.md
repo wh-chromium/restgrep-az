@@ -14,10 +14,13 @@ To add a new backend, follow these steps:
         Search(ctx context.Context, query string, opts SearchOptions) ([]SearchResult, error)
     }
     ```
-3.  **Map Flags to API**:
+3.  **Testable Execution**: If your backend executes a CLI tool (like `gh`), use the `Executor` interface pattern introduced in the `github` and `githubapi` packages. This allows for rigorous mapping tests without requiring the tool to be installed.
+4.  **Map Flags to API**:
     - **IgnoreCase (`-i`)**: If the remote API supports case-insensitivity, pass it through. If not, filter the results locally.
     - **WordRegexp (`-w`)**: Ensure the query matches only whole words. For GitHub, this means wrapping in `"quotes"`. For Azure, it's the default. For others, use regex `\b`.
-4.  **Populate Local Resolution Metadata**: To enable real-time local file resolution (replacing remote stubs with actual code), your `SearchResult` **MUST** include:
+    - **Limit (`-m`)**: Pass this to the API's "top" or "per_page" parameter.
+    - **Paths**: Handle multiple positional path arguments (Logical OR). For APIs that don't support OR, execute multiple requests and merge.
+5.  **Populate Local Resolution Metadata**: To enable real-time local file resolution (replacing remote stubs with actual code), your `SearchResult` **MUST** include:
     - `File`: The repository-relative path (e.g., `src/main.go`).
     - `ContentId`: The Git blob SHA1 of the file at the time of search.
     - `CharOffset`: The 0-based character offset of the match.

@@ -69,19 +69,23 @@ The settings file (`restgrep.json`) configures the backends and the execution st
 ```json
 {
   "execution_mode": "parallel",
+  "inexact_sha1_adjustment": true,
   "backends": [
     {
       "type": "azure",
       "organization": "Initech",
-      "project": "CoverReportTemplates"
+      "project": "CoverReportTemplates",
+      "limit": 100
     },
     {
       "type": "github",
-      "repo": "wh-chromium/restgrep-az"
+      "repo": "wh-chromium/restgrep-az",
+      "limit": 50
     },
     {
       "type": "github-api",
-      "repo": "chromium/chromium"
+      "repo": "chromium/chromium",
+      "limit": 20
     }
   ]
 }
