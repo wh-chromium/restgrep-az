@@ -81,7 +81,7 @@ func main() {
 		})
 	}
 
-	eng := engine.New(backends, os.Stdout, cfg.ExecutionMode)
+	eng := engine.New(backends, os.Stdout, os.Stderr, cfg.ExecutionMode)
 
 	ctx := context.Background()
 	if err := eng.Run(ctx, query, opts); err != nil {

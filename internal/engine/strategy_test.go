@@ -36,7 +36,7 @@ func TestEngineExecutionStrategies(t *testing.T) {
 			{Backend: bFail, Limit: 10},
 			{Backend: b2, Limit: 10},
 		}
-		eng := New(backends, &buf, "parallel")
+		eng := New(backends, &buf, &buf, "parallel")
 
 		err := eng.Run(context.Background(), "query", backend.SearchOptions{})
 		if err != nil {
@@ -50,6 +50,9 @@ func TestEngineExecutionStrategies(t *testing.T) {
 		if !strings.Contains(output, "[b1]") || !strings.Contains(output, "[b2]") {
 			t.Errorf("Parallel mode status lines missing: %s", output)
 		}
+		if !strings.Contains(output, "[fail] Error: forced failure") {
+			t.Errorf("Parallel mode did not report error: %s", output)
+		}
 	})
 
 	t.Run("Sequential Mode: Stops after first success", func(t *testing.T) {
@@ -61,7 +64,7 @@ func TestEngineExecutionStrategies(t *testing.T) {
 			{Backend: b1, Limit: 10},
 			{Backend: b2, Limit: 10},
 		}
-		eng := New(backends, &buf, "sequential")
+		eng := New(backends, &buf, &buf, "sequential")
 
 		err := eng.Run(context.Background(), "query", backend.SearchOptions{})
 		if err != nil {
@@ -77,6 +80,9 @@ func TestEngineExecutionStrategies(t *testing.T) {
 		}
 		if !strings.Contains(output, "[b1]") || strings.Contains(output, "[b2]") {
 			t.Errorf("Sequential mode status lines incorrect: %s", output)
+		}
+		if !strings.Contains(output, "[fail] Error: forced failure") {
+			t.Errorf("Sequential mode did not report error: %s", output)
 		}
 	})
 }

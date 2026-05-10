@@ -20,14 +20,15 @@ type EngineBackend struct {
 type Engine struct {
 	backends      []EngineBackend
 	out           io.Writer
+	errOut        io.Writer
 	executionMode string // "parallel" or "sequential"
 }
 
-func New(backends []EngineBackend, out io.Writer, mode string) *Engine {
+func New(backends []EngineBackend, out io.Writer, errOut io.Writer, mode string) *Engine {
 	if mode == "" {
 		mode = "parallel" // Default
 	}
-	return &Engine{backends: backends, out: out, executionMode: mode}
+	return &Engine{backends: backends, out: out, errOut: errOut, executionMode: mode}
 }
 
 func getGitBlobSHA1(data []byte) string {
@@ -89,6 +90,7 @@ func (e *Engine) Run(ctx context.Context, query string, opts backend.SearchOptio
 				})
 				break // Stop after first successful execution
 			}
+			fmt.Fprintf(e.errOut, "[%s] Error: %v\n", b.Name(), err)
 		}
 	} else {
 		// Parallel mode
@@ -125,8 +127,9 @@ func (e *Engine) Run(ctx context.Context, query string, opts backend.SearchOptio
 			group := <-resultsChan
 			if group.err == nil {
 				resultGroups = append(resultGroups, group)
+			} else {
+				fmt.Fprintf(e.errOut, "[%s] Error: %v\n", group.name, group.err)
 			}
-			// We ignore failed backends in parallel mode as requested
 		}
 	}
 
