@@ -42,7 +42,14 @@ It is important to note that `restgrep` backends primarily support **Glob-style 
 - **GitHub (CLI/API)**: Appended to the query string as `path:PATH` qualifiers.
 - **Multiple Paths**: If multiple paths are provided, `restgrep` searches in all of them (Logical OR behavior).
 
-## 5. Summary Table
+## 5. Result Sorting & Cache Efficiency
+
+`restgrep` automatically **merges and sorts all results by filename** before performing local file enrichment.
+
+- **Standard `grep` Parity**: Grouping matches by file is the standard behavior for code search tools.
+- **Cache Optimization**: By sorting by filename, the Single-File MRU cache achieves **100% efficiency**. `restgrep` will open, read, and hash each unique file in your result set **exactly once**, regardless of how many matches are found in that file or how many backends returned it.
+
+## 6. Summary Table
 
 | Matching Feature | Azure DevOps | GitHub (CLI/API) |
 | :--- | :--- | :--- |
