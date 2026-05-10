@@ -153,87 +153,64 @@ func (e *Engine) Run(ctx context.Context, query string, opts backend.SearchOptio
 		resultGroups = successfulGroups
 	}
 
-	// 1. Prepare sortable wrapper to track original order
-	type sortableResult struct {
-		res          *backend.SearchResult
-		backendIndex int
-		resultIndex  int
-		backendName  string
-		backendLimit int
-	}
-
-	var allResults []sortableResult
-	for bIdx, group := range resultGroups {
-		for rIdx := range group.results {
-			allResults = append(allResults, sortableResult{
-				res:          &group.results[rIdx],
-				backendIndex: bIdx,
-				resultIndex:  rIdx,
-				backendName:  group.name,
-				backendLimit: group.limit,
-			})
+	if !opts.Count && !opts.FilesWithMatches {
+		// 1. Prepare sortable slice of pointers to original results
+		var allPointers []*backend.SearchResult
+		for bIdx := range resultGroups {
+			for rIdx := range resultGroups[bIdx].results {
+				allPointers = append(allPointers, &resultGroups[bIdx].results[rIdx])
+			}
 		}
-	}
 
-	// 2. Sort by filename for 100% cache efficiency during enrichment
-	sort.Slice(allResults, func(i, j int) bool {
-		if allResults[i].res.File != allResults[j].res.File {
-			return allResults[i].res.File < allResults[j].res.File
-		}
-		return allResults[i].res.CharOffset < allResults[j].res.CharOffset
-	})
+		// 2. Sort by filename for 100% cache efficiency during enrichment
+		sort.Slice(allPointers, func(i, j int) bool {
+			if allPointers[i].File != allPointers[j].File {
+				return allPointers[i].File < allPointers[j].File
+			}
+			return allPointers[i].CharOffset < allPointers[j].CharOffset
+		})
 
-	// 3. Process enrichment (MRU Cache)
-	var cachedFile string
-	var cachedData []byte
-	var cachedSHA string
+		// 3. Process enrichment (MRU Cache)
+		var cachedFile string
+		var cachedData []byte
+		var cachedSHA string
 
-	for i := range allResults {
-		r := allResults[i].res
-		if r.ContentId != "" {
-			localPath := strings.TrimPrefix(r.File, "/")
-			if localPath != cachedFile {
-				data, err := os.ReadFile(localPath)
-				if err == nil {
-					cachedFile = localPath
-					cachedData = data
-					cachedSHA = getGitBlobSHA1(data)
-				} else {
-					cachedFile = ""
-					cachedData = nil
-					cachedSHA = ""
+		for _, r := range allPointers {
+			if r.ContentId != "" {
+				localPath := strings.TrimPrefix(r.File, "/")
+				if localPath != cachedFile {
+					data, err := os.ReadFile(localPath)
+					if err == nil {
+						cachedFile = localPath
+						cachedData = data
+						cachedSHA = getGitBlobSHA1(data)
+					} else {
+						cachedFile = ""
+						cachedData = nil
+						cachedSHA = ""
+						r.Content = fmt.Sprintf("%s (local file not found)", r.Content)
+					}
+				}
+
+				if localPath == cachedFile {
+					if cachedSHA == r.ContentId {
+						r.Content, r.Line = getLineFromOffset(cachedData, r.CharOffset)
+					} else {
+						r.Content = fmt.Sprintf("%s (local file mismatch)", r.Content)
+					}
+				} else if !strings.Contains(r.Content, "local file not found") {
 					r.Content = fmt.Sprintf("%s (local file not found)", r.Content)
 				}
 			}
-
-			if localPath == cachedFile {
-				if cachedSHA == r.ContentId {
-					r.Content, r.Line = getLineFromOffset(cachedData, r.CharOffset)
-				} else {
-					r.Content = fmt.Sprintf("%s (local file mismatch)", r.Content)
-				}
-			} else if !strings.Contains(r.Content, "local file not found") {
-				r.Content = fmt.Sprintf("%s (local file not found)", r.Content)
-			}
 		}
 	}
 
-	// 4. Re-sort to restore original provider-based order
-	sort.Slice(allResults, func(i, j int) bool {
-		if allResults[i].backendIndex != allResults[j].backendIndex {
-			return allResults[i].backendIndex < allResults[j].backendIndex
-		}
-		return allResults[i].resultIndex < allResults[j].resultIndex
-	})
-
-	// 5. Output grouped by provider
-	for bIdx, group := range resultGroups {
+	// 4. Output grouped by provider
+	for _, group := range resultGroups {
 		if opts.Count {
 			counts := make(map[string]int)
-			for _, sr := range allResults {
-				if sr.backendIndex == bIdx {
-					counts[sr.res.File]++
-				}
+			for _, r := range group.results {
+				counts[r.File]++
 			}
 			// Print counts for this provider in filename order
 			var files []string
@@ -246,23 +223,18 @@ func (e *Engine) Run(ctx context.Context, query string, opts backend.SearchOptio
 			}
 		} else if opts.FilesWithMatches {
 			files := make(map[string]bool)
-			for _, sr := range allResults {
-				if sr.backendIndex == bIdx {
-					if !files[sr.res.File] {
-						fmt.Fprintln(e.out, sr.res.File)
-						files[sr.res.File] = true
-					}
+			for _, r := range group.results {
+				if !files[r.File] {
+					fmt.Fprintln(e.out, r.File)
+					files[r.File] = true
 				}
 			}
 		} else {
-			for _, sr := range allResults {
-				if sr.backendIndex == bIdx {
-					r := sr.res
-					if opts.LineNumber {
-						fmt.Fprintf(e.out, "%s:%d:%s\n", r.File, r.Line, r.Content)
-					} else {
-						fmt.Fprintf(e.out, "%s:%s\n", r.File, r.Content)
-					}
+			for _, r := range group.results {
+				if opts.LineNumber {
+					fmt.Fprintf(e.out, "%s:%d:%s\n", r.File, r.Line, r.Content)
+				} else {
+					fmt.Fprintf(e.out, "%s:%s\n", r.File, r.Content)
 				}
 			}
 		}
