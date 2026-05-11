@@ -15,7 +15,8 @@
 | :--- | :--- | :--- |
 | `backends` | Array | List of search backends to use (see below). |
 | `execution_mode` | String | `parallel` (default) or `sequential`. |
-| `inexact_sha1_adjustment` | Boolean | If `true`, enables automatic Git-diff adjustment if local files have drifted. |
+| `backend_mode` | String | `naive`, `local` (default), or `try-diff-from-merge-base`. |
+| `merge_base_branch` | String | The branch to use for drift recovery in `try-diff-from-merge-base` mode (e.g., `origin/main`). |
 
 ### Execution Modes
 
@@ -27,6 +28,26 @@
 2.  **Sequential Fallback Mode (`sequential`)**:
     - Executes backends one-by-one in order.
     - **Stops after the first successful execution**.
+
+---
+
+### Resolver Modes
+
+1.  **Naive Mode (`naive`)**:
+    - Directly prints the remote match fragment returned by the API.
+    - No local validation or line number correction.
+
+2.  **Local Mode (`local`)**:
+    - Smarter, fallback-based resolution.
+    - Performs a substring search for the query pattern in your local working copy.
+    - Resolves real line numbers even if the file has drifted.
+    - Adds `(relaxed match)` if SHA1 doesn't match but pattern is found.
+
+3.  **Merge-Base Diff Mode (`try-diff-from-merge-base`)**:
+    - Complex drift recovery using `go-git`.
+    - Assumes the remote search index matches a specific branch (e.g. `origin/main`).
+    - Finds the file state at that branch, calculates its content, and diffs it against your local working copy.
+    - Adjusts offsets and line numbers based on the delta between the remote indexed branch and your current branch.
 
 ---
 
@@ -64,18 +85,20 @@
 ```json
 {
   "execution_mode": "parallel",
-  "inexact_sha1_adjustment": true,
+  "merge_base_branch": "origin/main",
   "backends": [
     {
       "type": "azure",
       "organization": "Initech",
       "project": "CoverReportTemplates",
-      "limit": 100
+      "limit": 100,
+      "backend_mode": "try-diff-from-merge-base"
     },
     {
       "type": "github-api",
       "repo": "chromium/chromium",
-      "limit": 50
+      "limit": 50,
+      "backend_mode": "local"
     }
   ]
 }

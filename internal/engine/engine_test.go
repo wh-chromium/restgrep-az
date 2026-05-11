@@ -7,7 +7,11 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/wh-chromium/restgrep-az/internal/models"
 	"github.com/wh-chromium/restgrep-az/internal/resolver"
 )
@@ -20,6 +24,87 @@ type mockFrontend struct {
 func (m *mockFrontend) Name() string { return m.name }
 func (m *mockFrontend) Search(ctx context.Context, query string, opts models.SearchOptions) ([]models.IntermediateResult, error) {
 	return m.results, nil
+}
+
+func TestEngineMergeBaseDiff(t *testing.T) {
+	// 1. Setup a temporary git repository
+	dir, err := os.MkdirTemp("", "restgrep_mergebase_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	origWd, _ := os.Getwd()
+	os.Chdir(dir)
+	defer os.Chdir(origWd)
+
+	repo, err := git.PlainInit(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Commit a file to 'main'
+	filename := "drift.txt"
+	content := "line A\nTARGET\nline C\n"
+	os.WriteFile(filename, []byte(content), 0644)
+
+	w, _ := repo.Worktree()
+	w.Add(filename)
+	commit, _ := w.Commit("initial on main", &git.CommitOptions{
+		Author: &object.Signature{Name: "Test", Email: "t@e.com", When: time.Now()},
+	})
+
+	// Create a branch reference 'origin/main' pointing to this commit
+	refName := plumbing.ReferenceName("refs/remotes/origin/main")
+	ref := plumbing.NewHashReference(refName, commit)
+	repo.Storer.SetReference(ref)
+
+	// TARGET is at offset 7 in main
+	remoteOffset := 7
+
+	// 3. Diverge locally: Add lines at top
+	newContent := "TOP 1\nTOP 2\nline A\nTARGET\nline C\n"
+	os.WriteFile(filename, []byte(newContent), 0644)
+
+	mockB := &mockFrontend{
+		name: "git-mergebase",
+		results: []models.IntermediateResult{
+			{
+				File:       filename,
+				RemoteSHA:  "indexed-sha", // Doesn't matter for this mode as much as branch state
+				CharOffset: remoteOffset,
+				RawFragment: "TARGET",
+				LineNumber: 1,
+			},
+		},
+	}
+
+	t.Run("Merge-Base Adjustment", func(t *testing.T) {
+		var buf bytes.Buffer
+		ef := EngineFrontend{
+			Frontend: mockB,
+			Resolver: &resolver.DiffMergeBaseResolver{},
+			Limit:    10,
+		}
+		eng := New([]EngineFrontend{ef}, &buf, &buf, "parallel")
+
+		opts := models.SearchOptions{
+			MergeBaseBranch: "origin/main",
+			LineNumber:      true,
+		}
+		if err := eng.Run(context.Background(), "TARGET", opts); err != nil {
+			t.Fatal(err)
+		}
+
+		output := buf.String()
+		// New line number should be 4
+		if !strings.Contains(output, "drift.txt:4:TARGET") {
+			t.Errorf("expected adjusted output to contain correct line 4, got:\n%s", output)
+		}
+		if !strings.Contains(output, "(adjusted from origin/main)") {
+			t.Errorf("expected adjustment hint")
+		}
+	})
 }
 
 func TestEngine3x2Matrix(t *testing.T) {

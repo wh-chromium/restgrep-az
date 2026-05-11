@@ -63,6 +63,7 @@ func main() {
 	query := args[0]
 	opts.Query = query
 	opts.Paths = args[1:]
+	opts.MergeBaseBranch = cfg.MergeBaseBranch
 
 	// 3. Instantiate Frontends and Resolvers
 	var eFrontends []engine.EngineFrontend
@@ -95,6 +96,13 @@ func main() {
 		if mode == "" {
 			mode = cfg.BackendMode
 		}
+		
+		// Map branch if specific for this backend
+		resolverOpts := opts
+		if bCfg.MergeBaseBranch != "" {
+			resolverOpts.MergeBaseBranch = bCfg.MergeBaseBranch
+		}
+
 		if mode == "" {
 			mode = string(models.ModeLocal)
 		}
@@ -104,6 +112,8 @@ func main() {
 			f.Resolver = &resolver.NaiveResolver{}
 		case models.ModeLocal:
 			f.Resolver = &resolver.LocalResolver{}
+		case models.ModeDiffMergeBase:
+			f.Resolver = &resolver.DiffMergeBaseResolver{}
 		default:
 			f.Resolver = &resolver.LocalResolver{}
 		}

@@ -14,8 +14,9 @@ type IntermediateResult struct {
 type ResolverMode string
 
 const (
-	ModeNaive     ResolverMode = "naive"
-	ModeLocal     ResolverMode = "local"
+	ModeNaive         ResolverMode = "naive"
+	ModeLocal         ResolverMode = "local"
+	ModeDiffMergeBase ResolverMode = "try-diff-from-merge-base"
 )
 
 // SearchOptions is the shared configuration for a search run.
@@ -23,7 +24,7 @@ type SearchOptions struct {
 	IgnoreCase            bool
 	LineNumber            bool
 	Count                 bool
-	FilesWithMatches bool
+	FilesWithMatches      bool
 	WordRegexp            bool
 	Limit                 int
 	Paths                 []string
@@ -32,4 +33,5 @@ type SearchOptions struct {
 	InexactSHA1Adjustment bool // Deprecated
 	Debug                 bool
 	Query                 string // The original query pattern
+	MergeBaseBranch       string // e.g. "origin/main"
 }
