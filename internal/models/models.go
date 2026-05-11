@@ -18,6 +18,12 @@ const (
 	ModeLocal         ResolverMode = "local"
 )
 
+type EnrichedLine struct {
+	Text   string
+	Number int
+	Match  bool
+}
+
 // SearchOptions is the shared configuration for a search run.
 type SearchOptions struct {
 	IgnoreCase       bool

@@ -69,7 +69,6 @@ For more details, see [docs/EXAMPLES.md](docs/EXAMPLES.md).
 
 - [API Specification & Configuration](docs/API.md)
 - [Query Matching Behavior & Wildcards](docs/MATCHING_BEHAVIOR.md)
-- [Path Filtering Examples](docs/EXAMPLES_PATHS.md)
 - [Limitations](docs/LIMITATIONS.md)
 - [Guide for AI Agents (Extending restgrep)](docs/FOR_AGENTS.md)
 

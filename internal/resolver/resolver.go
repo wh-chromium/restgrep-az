@@ -17,6 +17,7 @@ type Result struct {
 	Line    int
 	Content string
 	Message string // e.g. "local file mismatch"
+	Lines   []models.EnrichedLine
 }
 
 type Resolver interface {
@@ -103,7 +104,12 @@ func (l *LocalResolver) Resolve(ctx context.Context, ir models.IntermediateResul
 			}
 		}
 		
-		return Result{File: ir.File, Line: line, Content: content, Message: message}
+		var lines []models.EnrichedLine
+		if opts.BeforeContext > 0 || opts.AfterContext > 0 {
+			lines = GetLinesWithContext(data, foundOffset, opts.BeforeContext, opts.AfterContext)
+		}
+
+		return Result{File: ir.File, Line: line, Content: content, Message: message, Lines: lines}
 	}
 
 	if opts.Debug {
@@ -113,6 +119,72 @@ func (l *LocalResolver) Resolve(ctx context.Context, ir models.IntermediateResul
 }
 
 // Helpers
+
+func GetLinesWithContext(data []byte, charOffset int, before, after int) []models.EnrichedLine {
+	// 1. Find the match line start and number
+	matchLine := 1
+	lineStart := 0
+	for i := 0; i < charOffset && i < len(data); i++ {
+		if data[i] == '\n' {
+			matchLine++
+			lineStart = i + 1
+		}
+	}
+
+	// Helper to get line end
+	getLineEnd := func(start int) int {
+		for i := start; i < len(data); i++ {
+			if data[i] == '\n' || data[i] == '\r' {
+				return i
+			}
+		}
+		return len(data)
+	}
+
+	// 2. Collect match line
+	matchEnd := getLineEnd(lineStart)
+	lines := []models.EnrichedLine{{Text: string(data[lineStart:matchEnd]), Number: matchLine, Match: true}}
+
+	// 3. Collect "before" context
+	currStart := lineStart
+	for i := 0; i < before; i++ {
+		if currStart <= 0 {
+			break
+		}
+		// Look for start of previous line
+		searchIdx := currStart - 2
+		if searchIdx < 0 {
+			break
+		}
+		prevStart := 0
+		for j := searchIdx; j >= 0; j-- {
+			if data[j] == '\n' {
+				prevStart = j + 1
+				break
+			}
+		}
+		prevEnd := getLineEnd(prevStart)
+		lines = append([]models.EnrichedLine{{Text: string(data[prevStart:prevEnd]), Number: matchLine - (i + 1), Match: false}}, lines...)
+		currStart = prevStart
+	}
+
+	// 4. Collect "after" context
+	currEnd := matchEnd
+	for i := 0; i < after; i++ {
+		if currEnd >= len(data) {
+			break
+		}
+		nextStart := currEnd + 1
+		if nextStart >= len(data) {
+			break
+		}
+		nextEnd := getLineEnd(nextStart)
+		lines = append(lines, models.EnrichedLine{Text: string(data[nextStart:nextEnd]), Number: matchLine + (i + 1), Match: false})
+		currEnd = nextEnd
+	}
+
+	return lines
+}
 
 func GetGitBlobSHA1(data []byte) string {
 	// Re-calculating for the "relaxed match" hint

@@ -189,6 +189,8 @@ func (e *Engine) Run(ctx context.Context, query string, opts models.SearchOption
 		} else {
 			var lastLineNum int
 			var lastFile string
+			seenLines := make(map[string]bool)
+
 			for i := range g.results {
 				ir := &g.results[i]
 				res := finalResults[ir]
@@ -199,13 +201,48 @@ func (e *Engine) Run(ctx context.Context, query string, opts models.SearchOption
 					}
 				}
 
-				output := fmt.Sprintf("%s:%d:%s", res.File, res.Line, res.Content)
-				if res.Message != "" {
-					output += " " + res.Message
+				if len(res.Lines) > 0 {
+					for _, el := range res.Lines {
+						sep := ":"
+						if !el.Match {
+							sep = "-"
+						}
+						
+						var output string
+						if opts.LineNumber {
+							output = fmt.Sprintf("%s%s%d%s%s", res.File, sep, el.Number, sep, el.Text)
+						} else {
+							output = fmt.Sprintf("%s%s%s", res.File, sep, el.Text)
+						}
+						if el.Match && res.Message != "" {
+							output += " " + res.Message
+						}
+
+						// Deduplicate
+						if !seenLines[output] {
+							fmt.Fprintln(e.out, output)
+							seenLines[output] = true
+						}
+						lastLineNum = el.Number
+					}
+				} else {
+					// Fallback to stub
+					var output string
+					if opts.LineNumber {
+						output = fmt.Sprintf("%s:%d:%s", res.File, res.Line, res.Content)
+					} else {
+						output = fmt.Sprintf("%s:%s", res.File, res.Content)
+					}
+					if res.Message != "" {
+						output += " " + res.Message
+					}
+					
+					if !seenLines[output] {
+						fmt.Fprintln(e.out, output)
+						seenLines[output] = true
+					}
+					lastLineNum = res.Line
 				}
-				fmt.Fprintln(e.out, output)
-				
-				lastLineNum = res.Line
 				lastFile = res.File
 			}
 		}
