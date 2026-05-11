@@ -16,7 +16,6 @@ type ResolverMode string
 const (
 	ModeNaive         ResolverMode = "naive"
 	ModeLocal         ResolverMode = "local"
-	ModeDiffMergeBase ResolverMode = "try-diff-from-merge-base"
 )
 
 // SearchOptions is the shared configuration for a search run.

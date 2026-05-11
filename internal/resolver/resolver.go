@@ -5,13 +5,10 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"os"
 	"regexp"
 	"strings"
 
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/wh-chromium/restgrep-az/internal/models"
 )
 
@@ -113,88 +110,6 @@ func (l *LocalResolver) Resolve(ctx context.Context, ir models.IntermediateResul
 		fmt.Printf("[DEBUG][resolver] Query pattern not found in local file: %s\n", localPath)
 	}
 	return Result{File: ir.File, Line: ir.LineNumber, Content: ir.RawFragment, Message: "(local file out of sync)"}
-}
-
-// 3. Diff Merge-Base Resolver
-type DiffMergeBaseResolver struct{}
-
-func (l *DiffMergeBaseResolver) Resolve(ctx context.Context, ir models.IntermediateResult, opts models.SearchOptions) Result {
-	if opts.Debug {
-		fmt.Printf("[DEBUG][resolver] DiffMergeBase resolution for %s using branch %s\n", ir.File, opts.MergeBaseBranch)
-	}
-
-	localPath := strings.TrimPrefix(ir.File, "/")
-	localData, err := os.ReadFile(localPath)
-	if err != nil {
-		return Result{File: ir.File, Line: ir.LineNumber, Content: ir.RawFragment, Message: "(local file not found)"}
-	}
-
-	repo, err := git.PlainOpen(".")
-	if err != nil {
-		return (&LocalResolver{}).Resolve(ctx, ir, opts)
-	}
-
-	// Assume index is on the configured branch
-	branch := opts.MergeBaseBranch
-	if branch == "" {
-		branch = "origin/main"
-	}
-
-	// Try to find the branch hash
-	ref, err := repo.Reference(plumbing.ReferenceName("refs/remotes/"+branch), true)
-	if err != nil {
-		ref, _ = repo.Reference(plumbing.ReferenceName("refs/heads/"+branch), true)
-	}
-
-	if ref == nil {
-		if opts.Debug {
-			fmt.Printf("[DEBUG][resolver] Branch %s not found, falling back to Local\n", branch)
-		}
-		return (&LocalResolver{}).Resolve(ctx, ir, opts)
-	}
-
-	// Get file content at that branch tip
-	commit, _ := repo.CommitObject(ref.Hash())
-	tree, _ := commit.Tree()
-	f, err := tree.File(localPath)
-	if err != nil {
-		return (&LocalResolver{}).Resolve(ctx, ir, opts)
-	}
-
-	reader, err := f.Reader()
-	if err != nil {
-		return (&LocalResolver{}).Resolve(ctx, ir, opts)
-	}
-	defer reader.Close()
-	remoteData, err := io.ReadAll(reader)
-	if err != nil {
-		return (&LocalResolver{}).Resolve(ctx, ir, opts)
-	}
-
-	// Perform fuzzy matching based on remote data
-	remoteLineContent, _ := GetLineFromOffset(remoteData, ir.CharOffset)
-	if remoteLineContent == "" {
-		return (&LocalResolver{}).Resolve(ctx, ir, opts)
-	}
-
-	// Search for the remote content in our local working copy
-	searchData := string(localData)
-	searchTerm := remoteLineContent
-	if opts.IgnoreCase {
-		searchData = strings.ToLower(searchData)
-		searchTerm = strings.ToLower(searchTerm)
-	}
-
-	foundOffset := strings.Index(searchData, searchTerm)
-	if foundOffset >= 0 {
-		if opts.Debug {
-			fmt.Printf("[DEBUG][resolver] Successfully mapped %s from branch %s to local working copy\n", ir.File, branch)
-		}
-		content, line := GetLineFromOffset(localData, foundOffset)
-		return Result{File: ir.File, Line: line, Content: content, Message: fmt.Sprintf("(adjusted from %s)", branch)}
-	}
-
-	return (&LocalResolver{}).Resolve(ctx, ir, opts)
 }
 
 // Helpers

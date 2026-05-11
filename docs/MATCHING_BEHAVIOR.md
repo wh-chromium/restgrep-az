@@ -58,18 +58,16 @@ It is important to note that `restgrep` backends primarily support **Glob-style 
 | **Case Insensitive (`-i`)**| Supported natively | Supported (Local filter on fragments) |
 | **Whole Word (`-w`)** | Supported natively | Supported (via `"quotes"`) |
 | **Path Filtering** | Supported (via `Path` filter) | Supported (via `path:` qualifier) |
-| **Inexact SHA1** | Supported (via `--git-diff-inexact-sha1-adjustment`) | Supported (via `--git-diff-inexact-sha1-adjustment`) |
+| **Local Search** | Relaxed substring search | Relaxed substring search |
 | **Regex Support** | No (Glob only) | No (Glob only) |
 
-## 6. Inexact SHA1 Adjustment
+## 6. Relaxed Local Matching
 
-When you have a local copy of a repository, `restgrep` normally validates that your local file exactly matches the version that was indexed by the remote search engine (using Git blob SHA1).
+When you have a local copy of a repository, `restgrep` tries to resolve the remote match to the actual current source code on your disk.
 
-If your local file has changed (drifted) since it was indexed:
-1.  **Default Behavior**: `restgrep` detects the mismatch and prints a warning: `... (local file mismatch)`.
-2.  **Inexact Adjustment (`--git-diff-inexact-sha1-adjustment`)**:
-    - `restgrep` uses `go-git` to find the **original version** of the file in your local `.git` history.
-    - It performs a fuzzy line-mapping to find where your match shifted to in the **current** version of the file.
-    - It then corrects the line numbers and context dynamically.
+Unlike traditional tools that fail if the SHA1 hash doesn't match perfectly, `restgrep` uses a **Relaxed Matching** strategy:
+1.  **Exact Match**: If the local file's SHA1 matches the remote index, `restgrep` uses the provided offset to extract the line perfectly.
+2.  **Drift Recovery**: If the SHA1 doesn't match (i.e., you modified the file), `restgrep` performs a substring search for your **original query pattern** within the current local file.
+3.  **Result**: If found, it corrects the line numbers and content dynamically and appends a `(relaxed match)` hint.
 
-This ensures you can always see the real code even if your local repository is slightly newer or older than the remote search index.
+This ensures you can always see the real code even if your local repository is out of sync with the remote search index.

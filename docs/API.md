@@ -4,7 +4,8 @@
 
 ## Core Concepts
 
-- **Backend**: A remote service providing search capabilities (e.g., Azure DevOps, GitHub).
+- **Frontend**: A remote service client (e.g., Azure DevOps, GitHub, Local Diff).
+- **Resolver**: The logic that finalizes an intermediate match (e.g., Naive or Local resolution).
 - **Engine**: The core orchestrator that manages parallel/sequential execution, result merging, and local file enrichment.
 - **Double-Sort Strategy**: To maximize cache efficiency, the engine sorts all collected results by **filename** to perform O(files) local resolution, then re-sorts them to match the **original provider order** for the user.
 - **MRU Cache**: A single-file memory cache ensures each unique file is read and hashed only once per search.
@@ -13,10 +14,10 @@
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
-| `backends` | Array | List of search backends to use (see below). |
+| `backends` | Array | List of search frontends to use. |
 | `execution_mode` | String | `parallel` (default) or `sequential`. |
-| `backend_mode` | String | `naive`, `local` (default), or `try-diff-from-merge-base`. |
-| `merge_base_branch` | String | The branch to use for drift recovery in `try-diff-from-merge-base` mode (e.g., `origin/main`). |
+| `backend_mode` | String | `naive` or `local` (default). |
+| `merge_base_branch` | String | Global default branch for `local-diff-add`. |
 
 ### Execution Modes
 
@@ -28,8 +29,6 @@
 2.  **Sequential Fallback Mode (`sequential`)**:
     - Executes backends one-by-one in order.
     - **Stops after the first successful execution**.
-
----
 
 ### Resolver Modes
 
@@ -43,15 +42,9 @@
     - Resolves real line numbers even if the file has drifted.
     - Adds `(relaxed match)` if SHA1 doesn't match but pattern is found.
 
-3.  **Merge-Base Diff Mode (`try-diff-from-merge-base`)**:
-    - Complex drift recovery using `go-git`.
-    - Assumes the remote search index matches a specific branch (e.g. `origin/main`).
-    - Finds the file state at that branch, calculates its content, and diffs it against your local working copy.
-    - Adjusts offsets and line numbers based on the delta between the remote indexed branch and your current branch.
-
 ---
 
-## Supported Backends
+## Supported Frontends
 
 ### 1. Azure DevOps (`azure`)
 - **API**: Uses Azure DevOps REST API v7.1.
@@ -68,15 +61,21 @@
 - **Header**: Uses `vnd.github.v3.text-match+json` for rich match metadata.
 - **Advantage**: Higher metadata consistency than the raw CLI backend.
 
-### Backend Config Fields
+### 4. Local Diff Add (`local-diff-add`)
+- **Mechanism**: Uses `go-git` to find all newly added lines since the `merge-base` of your current branch and a target branch (e.g. `origin/main`).
+- **Use Case**: Find patterns only in your recent local changes before committing.
+
+### Frontend Config Fields
 
 | Field | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| `type` | String | Yes | `azure`, `github`, or `github-api`. |
+| `type` | String | Yes | `azure`, `github`, `github-api`, or `local-diff-add`. |
 | `organization` | String | Azure only | Azure DevOps organization name. |
 | `project` | String | Azure only | Azure DevOps project name. |
 | `repo` | String | GH only | Target repository (e.g., `chromium/chromium`). |
 | `limit` | Integer | No | Result limit for this backend (default: 100). |
+| `backend_mode` | String | No | Override resolver mode for this frontend. |
+| `merge_base_branch` | String | No | Branch for `local-diff-add` (default: `origin/main`). |
 
 ---
 
@@ -88,17 +87,21 @@
   "merge_base_branch": "origin/main",
   "backends": [
     {
+      "type": "local-diff-add",
+      "merge_base_branch": "origin/main"
+    },
+    {
       "type": "azure",
       "organization": "Initech",
       "project": "CoverReportTemplates",
       "limit": 100,
-      "backend_mode": "try-diff-from-merge-base"
+      "backend_mode": "local"
     },
     {
       "type": "github-api",
       "repo": "chromium/chromium",
       "limit": 50,
-      "backend_mode": "local"
+      "backend_mode": "naive"
     }
   ]
 }

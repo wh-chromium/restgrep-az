@@ -4,12 +4,11 @@ A token-efficient normalization layer for remote code search APIs (Azure DevOps 
 
 ## Features
 
-- **Multi-Backend**: Search across Azure DevOps and GitHub (CLI or API) simultaneously.
+- **Multi-Backend**: Search across Azure DevOps, GitHub, and **Local Git Diffs** simultaneously.
 - **Grep Parity**: Supports standard flags like `-i`, `-n`, `-c`, `-l`, `-w`, and `-m`.
 - **Context Control**: Supports `-A`, `-B`, and `-C` using local resolution.
 - **Dynamic Execution**: Choose between `parallel` (simultaneous) or `sequential` (fallback) search modes.
-- **Local Resolution**: Automatically resolves remote match stubs to actual source lines by validating local files against Git blob SHA1 (`ContentId`).
-- **Inexact Match Recovery**: Automatically adjusts line offsets using `git diff` logic if local files have drifted from the remote index.
+- **Relaxed Local Resolution**: Automatically resolves remote match stubs to actual source lines, with a robust fallback search if file versions have drifted.
 - **High Performance**: Uses a Single-File MRU cache and global filename sorting to ensure each local file is read/hashed exactly once.
 
 ## Installation & Building
@@ -32,7 +31,6 @@ go build -o restgrep.exe cmd/restgrep/main.go
 ```json
 {
   "execution_mode": "parallel",
-  "inexact_sha1_adjustment": true,
   "backends": [
     {
       "type": "azure",
@@ -41,9 +39,8 @@ go build -o restgrep.exe cmd/restgrep/main.go
       "limit": 100
     },
     {
-      "type": "github-api",
-      "repo": "chromium/chromium",
-      "limit": 10
+      "type": "local-diff-add",
+      "merge_base_branch": "origin/main"
     }
   ]
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/wh-chromium/restgrep-az/internal/frontend/azure"
 	"github.com/wh-chromium/restgrep-az/internal/frontend/github"
 	"github.com/wh-chromium/restgrep-az/internal/frontend/githubapi"
+	"github.com/wh-chromium/restgrep-az/internal/frontend/localdiff"
 	"github.com/wh-chromium/restgrep-az/internal/models"
 	"github.com/wh-chromium/restgrep-az/internal/resolver"
 )
@@ -86,6 +87,8 @@ func main() {
 			githubAPIBackend := githubapi.New(bCfg.Repo)
 			githubAPIBackend.Executor = &githubapi.RealExecutor{}
 			f.Frontend = githubAPIBackend
+		case "local-diff-add":
+			f.Frontend = localdiff.New(bCfg.MergeBaseBranch)
 		default:
 			fmt.Fprintf(os.Stderr, "Unknown frontend type: %s\n", bCfg.Type)
 			continue
@@ -112,8 +115,6 @@ func main() {
 			f.Resolver = &resolver.NaiveResolver{}
 		case models.ModeLocal:
 			f.Resolver = &resolver.LocalResolver{}
-		case models.ModeDiffMergeBase:
-			f.Resolver = &resolver.DiffMergeBaseResolver{}
 		default:
 			f.Resolver = &resolver.LocalResolver{}
 		}
