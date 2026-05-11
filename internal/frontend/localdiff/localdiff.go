@@ -3,6 +3,7 @@ package localdiff
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/go-git/go-git/v5"
@@ -75,6 +76,19 @@ func (b *Backend) Search(ctx context.Context, query string, opts models.SearchOp
 		return nil, fmt.Errorf("failed to compute patch: %w", err)
 	}
 
+	var wordRe *regexp.Regexp
+	if opts.WordRegexp {
+		pattern := `\b` + regexp.QuoteMeta(query) + `\b`
+		if opts.IgnoreCase {
+			pattern = `(?i)\b` + regexp.QuoteMeta(query) + `\b`
+		}
+		var err error
+		wordRe, err = regexp.Compile(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("invalid word-regexp: %w", err)
+		}
+	}
+
 	var results []models.IntermediateResult
 	
 	// 5. Iterate through file patches
@@ -109,22 +123,20 @@ func (b *Backend) Search(ctx context.Context, query string, opts models.SearchOp
 						continue
 					}
 					
-					match := false
-					lineToCheck := line
-					queryToCheck := query
-					if opts.IgnoreCase {
-						lineToCheck = strings.ToLower(lineToCheck)
-						queryToCheck = strings.ToLower(queryToCheck)
-					}
-					
-					// Substring or Word Regexp?
-					// For simplicity in this complex mode, let's just do substring for now
-					// or handle WordRegexp properly if needed.
-					if strings.Contains(lineToCheck, queryToCheck) {
-						match = true
+					matched := false
+					if opts.WordRegexp {
+						matched = wordRe.MatchString(line)
+					} else {
+						lineToCheck := line
+						queryToCheck := query
+						if opts.IgnoreCase {
+							lineToCheck = strings.ToLower(lineToCheck)
+							queryToCheck = strings.ToLower(queryToCheck)
+						}
+						matched = strings.Contains(lineToCheck, queryToCheck)
 					}
 
-					if match {
+					if matched {
 						results = append(results, models.IntermediateResult{
 							File:        targetFile,
 							RawFragment: strings.TrimSpace(line),
