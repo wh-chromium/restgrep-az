@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"reflect"
 	"testing"
 
 	"github.com/wh-chromium/restgrep-az/internal/models"
@@ -23,14 +24,15 @@ func (m *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}, nil
 }
 
-func TestAzureFrontend_Search(t *testing.T) {
-	mockResponse := `{
-		"count": 1,
+func TestAzureFrontend_MapsToIntermediateResult(t *testing.T) {
+	// Simulated Raw Output from Azure DevOps REST API
+	mockRawAzureAPIResponse := `{
+		"count": 2,
 		"results": [
 			{
 				"fileName": "Controller.cs",
 				"path": "/src/Controller.cs",
-				"contentId": "dummy-sha",
+				"contentId": "azure-blob-sha-1",
 				"matches": {
 					"content": [
 						{ "charOffset": 10, "length": 5 }
@@ -40,7 +42,7 @@ func TestAzureFrontend_Search(t *testing.T) {
 			{
 				"fileName": "NoMatch.cs",
 				"path": "/src/NoMatch.cs",
-				"contentId": "dummy-sha-2",
+				"contentId": "azure-blob-sha-2",
 				"matches": {
 					"content": []
 				}
@@ -49,7 +51,7 @@ func TestAzureFrontend_Search(t *testing.T) {
 	}`
 
 	b := New("org", "proj")
-	b.HTTPClient = &http.Client{Transport: &mockTransport{responseBody: mockResponse, statusCode: 200}}
+	b.HTTPClient = &http.Client{Transport: &mockTransport{responseBody: mockRawAzureAPIResponse, statusCode: 200}}
 	b.TokenFetcher = func(ctx context.Context) (string, error) { return "token", nil }
 
 	results, err := b.Search(context.Background(), "query", models.SearchOptions{})
@@ -57,35 +59,33 @@ func TestAzureFrontend_Search(t *testing.T) {
 		t.Fatalf("Search failed: %v", err)
 	}
 
-	if len(results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(results))
+	// Expected Translation to Intermediate Format
+	expectedIntermediates := []models.IntermediateResult{
+		{
+			File:        "/src/Controller.cs",
+			RemoteSHA:   "azure-blob-sha-1",
+			CharOffset:  10,
+			Length:      5,
+			RawFragment: "[Match at char offset 10, length 5]",
+			LineNumber:  1,
+		},
+		{
+			File:        "/src/NoMatch.cs",
+			RemoteSHA:   "azure-blob-sha-2",
+			CharOffset:  -1,
+			Length:      0,
+			RawFragment: "[File match]",
+			LineNumber:  1,
+		},
 	}
 
-	// 1. Check match with content
-	if results[0].File != "/src/Controller.cs" {
-		t.Errorf("got %s", results[0].File)
-	}
-	if results[0].RemoteSHA != "dummy-sha" {
-		t.Errorf("got %s", results[0].RemoteSHA)
-	}
-	if results[0].CharOffset != 10 {
-		t.Errorf("got %d", results[0].CharOffset)
-	}
-	if results[0].Length != 5 {
-		t.Errorf("got %d", results[0].Length)
-	}
-	if results[0].RawFragment != "[Match at char offset 10, length 5]" {
-		t.Errorf("got %s", results[0].RawFragment)
+	if len(results) != len(expectedIntermediates) {
+		t.Fatalf("Expected %d intermediate results, got %d", len(expectedIntermediates), len(results))
 	}
 
-	// 2. Check file match (no content matches)
-	if results[1].File != "/src/NoMatch.cs" {
-		t.Errorf("got %s", results[1].File)
-	}
-	if results[1].CharOffset != -1 {
-		t.Errorf("got %d", results[1].CharOffset)
-	}
-	if results[1].RawFragment != "[File match]" {
-		t.Errorf("got %s", results[1].RawFragment)
+	for i, expected := range expectedIntermediates {
+		if !reflect.DeepEqual(results[i], expected) {
+			t.Errorf("Result %d mapping failed.\nExpected: %+v\nGot:      %+v", i, expected, results[i])
+		}
 	}
 }

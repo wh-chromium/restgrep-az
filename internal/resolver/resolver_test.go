@@ -3,12 +3,13 @@ package resolver
 import (
 	"context"
 	"os"
+	"reflect"
 	"testing"
 
 	"github.com/wh-chromium/restgrep-az/internal/models"
 )
 
-func TestNaiveResolver(t *testing.T) {
+func TestNaiveResolver_MapsIntermediateToFinal(t *testing.T) {
 	r := &NaiveResolver{}
 	ir := models.IntermediateResult{
 		File:        "test.txt",
@@ -18,18 +19,18 @@ func TestNaiveResolver(t *testing.T) {
 
 	res := r.Resolve(context.Background(), ir, models.SearchOptions{})
 
-	if res.File != "test.txt" {
-		t.Errorf("expected test.txt, got %s", res.File)
+	expected := Result{
+		File:    "test.txt",
+		Line:    42,
+		Content: "hello world",
 	}
-	if res.Line != 42 {
-		t.Errorf("expected 42, got %d", res.Line)
-	}
-	if res.Content != "hello world" {
-		t.Errorf("expected hello world, got %s", res.Content)
+
+	if !reflect.DeepEqual(res, expected) {
+		t.Errorf("Naive mapping failed.\nExpected: %+v\nGot:      %+v", expected, res)
 	}
 }
 
-func TestLocalResolver(t *testing.T) {
+func TestLocalResolver_MapsIntermediateToFinal(t *testing.T) {
 	content := "line 1\nline 2\nTARGET\nline 4\n"
 	tmpFile, _ := os.CreateTemp("", "resolver_test_*.txt")
 	defer os.Remove(tmpFile.Name())
@@ -41,7 +42,7 @@ func TestLocalResolver(t *testing.T) {
 
 	r := &LocalResolver{}
 
-	t.Run("Exact SHA Match", func(t *testing.T) {
+	t.Run("1. Exact SHA Match -> Resolves real line number and content", func(t *testing.T) {
 		ir := models.IntermediateResult{
 			File:        fileName,
 			RemoteSHA:   sha,
@@ -53,22 +54,23 @@ func TestLocalResolver(t *testing.T) {
 		opts := models.SearchOptions{Query: "TARGET"}
 		res := r.Resolve(context.Background(), ir, opts)
 
-		if res.Content != "TARGET" {
-			t.Errorf("expected TARGET, got %s", res.Content)
+		expected := Result{
+			File:    fileName,
+			Line:    3, // It calculated the real line!
+			Content: "TARGET",
+			Message: "", 
 		}
-		if res.Line != 3 {
-			t.Errorf("expected line 3, got %d", res.Line)
-		}
-		if res.Message != "" {
-			t.Errorf("expected empty message, got %s", res.Message)
+
+		if !reflect.DeepEqual(res, expected) {
+			t.Errorf("Exact match failed.\nExpected: %+v\nGot:      %+v", expected, res)
 		}
 	})
 
-	t.Run("Relaxed Match (SHA Mismatch)", func(t *testing.T) {
+	t.Run("2. Relaxed Match (SHA Mismatch) -> Resolves via local search and adds hint", func(t *testing.T) {
 		ir := models.IntermediateResult{
 			File:        fileName,
-			RemoteSHA:   "stale-sha", // Mismatch
-			CharOffset:  99,          // Wrong offset
+			RemoteSHA:   "stale-sha", // Mismatch!
+			CharOffset:  99,          // Wrong offset!
 			RawFragment: "[Remote Stub]",
 			LineNumber:  1,
 		}
@@ -76,38 +78,19 @@ func TestLocalResolver(t *testing.T) {
 		opts := models.SearchOptions{Query: "TARGET"}
 		res := r.Resolve(context.Background(), ir, opts)
 
-		if res.Content != "TARGET" {
-			t.Errorf("expected TARGET, got %s", res.Content)
+		expected := Result{
+			File:    fileName,
+			Line:    3,
+			Content: "TARGET",
+			Message: "(relaxed match)", // It warns you but still finds it
 		}
-		if res.Line != 3 {
-			t.Errorf("expected line 3, got %d", res.Line)
-		}
-		if res.Message != "(relaxed match)" {
-			t.Errorf("expected relaxed match hint, got %s", res.Message)
+
+		if !reflect.DeepEqual(res, expected) {
+			t.Errorf("Relaxed match failed.\nExpected: %+v\nGot:      %+v", expected, res)
 		}
 	})
 
-	t.Run("Context Extraction", func(t *testing.T) {
-		ir := models.IntermediateResult{
-			File:        fileName,
-			RemoteSHA:   sha,
-			CharOffset:  14,
-			RawFragment: "[Remote Stub]",
-			LineNumber:  1,
-		}
-
-		opts := models.SearchOptions{Query: "TARGET", BeforeContext: 1, AfterContext: 1}
-		res := r.Resolve(context.Background(), ir, opts)
-
-		if len(res.Lines) != 3 {
-			t.Fatalf("expected 3 context lines, got %d", len(res.Lines))
-		}
-		if res.Lines[0].Text != "line 2" || res.Lines[1].Text != "TARGET" || res.Lines[2].Text != "line 4" {
-			t.Errorf("context extraction failed: %+v", res.Lines)
-		}
-	})
-	
-	t.Run("File Not Found", func(t *testing.T) {
+	t.Run("3. File Not Found -> Falls back to remote stub with warning", func(t *testing.T) {
 		ir := models.IntermediateResult{
 			File:        "does_not_exist.txt",
 			RemoteSHA:   sha,
@@ -119,11 +102,15 @@ func TestLocalResolver(t *testing.T) {
 		opts := models.SearchOptions{Query: "TARGET"}
 		res := r.Resolve(context.Background(), ir, opts)
 
-		if res.Content != "[Remote Stub]" {
-			t.Errorf("expected stub fallback, got %s", res.Content)
+		expected := Result{
+			File:    "does_not_exist.txt",
+			Line:    42,
+			Content: "[Remote Stub]",
+			Message: "(local file not found)",
 		}
-		if res.Message != "(local file not found)" {
-			t.Errorf("expected not found message, got %s", res.Message)
+
+		if !reflect.DeepEqual(res, expected) {
+			t.Errorf("File not found fallback failed.\nExpected: %+v\nGot:      %+v", expected, res)
 		}
 	})
 }

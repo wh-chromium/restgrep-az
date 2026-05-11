@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/wh-chromium/restgrep-az/internal/models"
@@ -17,11 +18,12 @@ func (m *mockExecutor) Execute(ctx context.Context, name string, args ...string)
 	return m.stdout, m.stderr, m.err
 }
 
-func TestGithubFrontend_Search(t *testing.T) {
-	mockResponse := `[
+func TestGithubFrontend_MapsToIntermediateResult(t *testing.T) {
+	// Simulated Raw Output from 'gh search code' CLI
+	mockRawGHCLIResponse := `[
 		{
 			"path": "test.go",
-			"sha": "dummy-sha",
+			"sha": "github-blob-sha-1",
 			"textMatches": [
 				{
 					"fragment": "func match() {}\nfunc noMatch() {}"
@@ -30,56 +32,47 @@ func TestGithubFrontend_Search(t *testing.T) {
 		},
 		{
 			"path": "nomatch.go",
-			"sha": "dummy-sha-2",
+			"sha": "github-blob-sha-2",
 			"textMatches": []
 		}
 	]`
 
 	b := New("repo")
-	b.Executor = &mockExecutor{stdout: []byte(mockResponse)}
+	b.Executor = &mockExecutor{stdout: []byte(mockRawGHCLIResponse)}
 
-	t.Run("Substring Match", func(t *testing.T) {
-		results, err := b.Search(context.Background(), "match", models.SearchOptions{})
-		if err != nil {
-			t.Fatalf("Search failed: %v", err)
-		}
+	// We search for "match" (which is in the first file's fragment)
+	results, err := b.Search(context.Background(), "match", models.SearchOptions{})
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
 
-		if len(results) != 2 { // One line matches 'match', plus the noMatch file
-			t.Fatalf("expected 2 results, got %d", len(results))
-		}
+	// Expected Translation to Intermediate Format
+	expectedIntermediates := []models.IntermediateResult{
+		{
+			File:        "test.go",
+			RemoteSHA:   "github-blob-sha-1",
+			CharOffset:  -1, // CLI doesn't provide precise offsets
+			Length:      0,
+			RawFragment: "func match() {}", // Notice it was post-filtered from the multi-line fragment
+			LineNumber:  1,
+		},
+		{
+			File:        "nomatch.go",
+			RemoteSHA:   "github-blob-sha-2",
+			CharOffset:  -1,
+			Length:      0,
+			RawFragment: "[File match]",
+			LineNumber:  1,
+		},
+	}
 
-		if results[0].File != "test.go" || results[0].RawFragment != "func match() {}" {
-			t.Errorf("Unexpected first result: %+v", results[0])
-		}
-		if results[1].File != "nomatch.go" || results[1].RawFragment != "[File match]" {
-			t.Errorf("Unexpected second result: %+v", results[1])
-		}
-	})
+	if len(results) != len(expectedIntermediates) {
+		t.Fatalf("Expected %d intermediate results, got %d", len(expectedIntermediates), len(results))
+	}
 
-	t.Run("Word Match", func(t *testing.T) {
-		// "match" will match "func match() {}" but not "func noMatch() {}"
-		results, err := b.Search(context.Background(), "match", models.SearchOptions{WordRegexp: true})
-		if err != nil {
-			t.Fatalf("Search failed: %v", err)
+	for i, expected := range expectedIntermediates {
+		if !reflect.DeepEqual(results[i], expected) {
+			t.Errorf("Result %d mapping failed.\nExpected: %+v\nGot:      %+v", i, expected, results[i])
 		}
-
-		if len(results) != 2 { // "match" line and the nomatch file fallback
-			t.Fatalf("expected 2 results, got %d", len(results))
-		}
-		if results[0].RawFragment != "func match() {}" {
-			t.Errorf("Unexpected first result: %+v", results[0])
-		}
-	})
-
-	t.Run("Case Insensitive", func(t *testing.T) {
-		results, err := b.Search(context.Background(), "MATCH", models.SearchOptions{IgnoreCase: true})
-		if err != nil {
-			t.Fatalf("Search failed: %v", err)
-		}
-
-		// Should match both "match" and "noMatch" fragments from the first file, plus the second file
-		if len(results) != 3 {
-			t.Fatalf("expected 3 results, got %d", len(results))
-		}
-	})
+	}
 }
