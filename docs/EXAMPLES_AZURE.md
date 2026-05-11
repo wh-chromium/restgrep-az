@@ -34,20 +34,20 @@ restgrep "CodeSearchController"
 src/controllers/CodeSearchController.cs:12:public class CodeSearchController : Controller {
 ```
 
-### Inexact Match Recovery
+### Relaxed Match Recovery
 
-If your local file has been modified (drifted) since the remote search engine last indexed it, standard SHA1 validation will fail. You can use the inexact adjustment flag to recover the match:
+If your local file has been modified (drifted) since the remote search engine last indexed it, standard SHA1 validation will fail. `restgrep` automatically falls back to a relaxed substring search to find where the match moved:
 
 ```bash
-# Force restgrep to find where the match moved using git diff logic
-restgrep --git-diff-inexact-sha1-adjustment "CodeSearchController"
+# restgrep automatically finds the moved line
+restgrep "CodeSearchController"
 ```
 
 **Output:**
 ```text
-src/controllers/CodeSearchController.cs:15:public class CodeSearchController : Controller {
+src/controllers/CodeSearchController.cs:15:public class CodeSearchController : Controller { (relaxed match)
 ```
-*(Note: restgrep identified that the class definition moved from line 12 to 15 in your local file and corrected the output automatically.)*
+*(Note: restgrep identified that the class definition moved from line 12 to 15 in your local file and corrected the output automatically, appending the `(relaxed match)` hint.)*
 
 ## Supported Flags (Simulated)
 

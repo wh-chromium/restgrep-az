@@ -5,16 +5,15 @@ import (
 )
 
 type SearchOptions struct {
-	IgnoreCase            bool
-	LineNumber            bool
-	Count                 bool
-	FilesWithMatches      bool
-	WordRegexp            bool
-	Limit                 int
-	Paths                 []string
-	AfterContext          int
-	BeforeContext         int
-	InexactSHA1Adjustment bool
+	IgnoreCase       bool
+	LineNumber       bool
+	Count            bool
+	FilesWithMatches bool
+	WordRegexp       bool
+	Limit            int
+	Paths            []string
+	AfterContext     int
+	BeforeContext    int
 }
 
 type SearchResult struct {

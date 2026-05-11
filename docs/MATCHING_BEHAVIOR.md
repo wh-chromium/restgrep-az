@@ -61,7 +61,7 @@ It is important to note that `restgrep` backends primarily support **Glob-style 
 | **Local Search** | Relaxed substring search | Relaxed substring search |
 | **Regex Support** | No (Glob only) | No (Glob only) |
 
-## 6. Relaxed Local Matching
+## 7. Relaxed Local Matching
 
 When you have a local copy of a repository, `restgrep` tries to resolve the remote match to the actual current source code on your disk.
 

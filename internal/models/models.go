@@ -20,17 +20,16 @@ const (
 
 // SearchOptions is the shared configuration for a search run.
 type SearchOptions struct {
-	IgnoreCase            bool
-	LineNumber            bool
-	Count                 bool
-	FilesWithMatches      bool
-	WordRegexp            bool
-	Limit                 int
-	Paths                 []string
-	AfterContext          int
-	BeforeContext         int
-	InexactSHA1Adjustment bool // Deprecated
-	Debug                 bool
-	Query                 string // The original query pattern
-	MergeBaseBranch       string // e.g. "origin/main"
+	IgnoreCase       bool
+	LineNumber       bool
+	Count            bool
+	FilesWithMatches bool
+	WordRegexp       bool
+	Limit            int
+	Paths            []string
+	AfterContext     int
+	BeforeContext    int
+	Debug            bool
+	Query            string // The original query pattern
+	MergeBaseBranch  string // e.g. "origin/main"
 }
