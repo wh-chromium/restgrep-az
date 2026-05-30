@@ -11,7 +11,7 @@ type BackendConfig struct {
 	Project         string `json:"project,omitempty"`
 	Repo            string `json:"repo,omitempty"`
 	Limit           int    `json:"limit,omitempty"`
-	BackendMode     string `json:"backend_mode,omitempty"`      // "naive", "local", "try-diff-from-merge-base"
+	BackendMode     string `json:"backend_mode,omitempty"`      // "naive", "local"
 	MergeBaseBranch string `json:"merge_base_branch,omitempty"` // e.g. "origin/main"
 }
 

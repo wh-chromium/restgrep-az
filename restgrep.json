@@ -5,7 +5,7 @@
       "type": "github",
       "repo": "wh-chromium/restgrep-az",
       "limit": 20,
-      "backend_mode": "git-diff"
+      "backend_mode": "local"
     }
   ]
 }
