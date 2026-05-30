@@ -2,30 +2,10 @@ package backend
 
 import (
 	"context"
+	"github.com/wh-chromium/restgrep-az/internal/models"
 )
-
-type SearchOptions struct {
-	IgnoreCase       bool
-	LineNumber       bool
-	Count            bool
-	FilesWithMatches bool
-	WordRegexp       bool
-	Limit            int
-	Paths            []string
-	AfterContext     int
-	BeforeContext    int
-}
-
-type SearchResult struct {
-	File       string
-	Line       int
-	Content    string
-	ContentId  string
-	CharOffset int
-	Length     int
-}
 
 type Backend interface {
 	Name() string
-	Search(ctx context.Context, query string, opts SearchOptions) ([]SearchResult, error)
+	Search(ctx context.Context, query string, opts models.SearchOptions) ([]models.IntermediateResult, error)
 }

@@ -12,18 +12,18 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/wh-chromium/restgrep-az/internal/frontend/localdiff"
+	"github.com/wh-chromium/restgrep-az/internal/backend/localdiff"
 	"github.com/wh-chromium/restgrep-az/internal/models"
 	"github.com/wh-chromium/restgrep-az/internal/resolver"
 )
 
-type mockFrontend struct {
+type mockBackend struct {
 	name    string
 	results []models.IntermediateResult
 }
 
-func (m *mockFrontend) Name() string { return m.name }
-func (m *mockFrontend) Search(ctx context.Context, query string, opts models.SearchOptions) ([]models.IntermediateResult, error) {
+func (m *mockBackend) Name() string { return m.name }
+func (m *mockBackend) Search(ctx context.Context, query string, opts models.SearchOptions) ([]models.IntermediateResult, error) {
 	return m.results, nil
 }
 
@@ -36,8 +36,8 @@ func TestEngineMatrix(t *testing.T) {
 	tmpFile.Close()
 	fileName := tmpFile.Name()
 
-	// Frontends (Simulated)
-	frontends := []string{"azure", "github", "githubapi"}
+	// Backends (Simulated)
+	backends := []string{"azure", "github", "githubapi"}
 	// Resolvers
 	resolvers := []struct {
 		name string
@@ -47,9 +47,9 @@ func TestEngineMatrix(t *testing.T) {
 		{"local", &resolver.LocalResolver{}},
 	}
 
-	for _, fName := range frontends {
+	for _, bName := range backends {
 		for _, rInfo := range resolvers {
-			t.Run(fmt.Sprintf("%s_%s", fName, rInfo.name), func(t *testing.T) {
+			t.Run(fmt.Sprintf("%s_%s", bName, rInfo.name), func(t *testing.T) {
 				var buf bytes.Buffer
 				ir := models.IntermediateResult{
 					File:        fileName,
@@ -58,10 +58,10 @@ func TestEngineMatrix(t *testing.T) {
 					RawFragment: "[Remote Fragment]",
 					LineNumber:  1,
 				}
-				mf := &mockFrontend{name: fName, results: []models.IntermediateResult{ir}}
-				ef := EngineFrontend{Frontend: mf, Resolver: rInfo.res, Limit: 10}
+				mb := &mockBackend{name: bName, results: []models.IntermediateResult{ir}}
+				eb := EngineBackend{Backend: mb, Resolver: rInfo.res, Limit: 10}
 
-				eng := New([]EngineFrontend{ef}, &buf, &buf, "parallel")
+				eng := New([]EngineBackend{eb}, &buf, &buf, "parallel")
 				opts := models.SearchOptions{Query: "TARGET_STRING"}
 				eng.Run(context.Background(), "TARGET_STRING", opts)
 
@@ -80,7 +80,7 @@ func TestEngineMatrix(t *testing.T) {
 	}
 }
 
-func TestLocalDiffAddFrontend(t *testing.T) {
+func TestLocalDiffAddBackend(t *testing.T) {
 	// 1. Setup a temporary git repository
 	dir, err := os.MkdirTemp("", "restgrep_localdiff_test")
 	if err != nil {
@@ -117,7 +117,7 @@ func TestLocalDiffAddFrontend(t *testing.T) {
 		Author: &object.Signature{Name: "T", Email: "t@e.com", When: time.Now()},
 	})
 
-	// 4. Test the frontend
+	// 4. Test the backend
 	ldf := localdiff.New("origin/main")
 	opts := models.SearchOptions{MergeBaseBranch: "origin/main"}
 	results, err := ldf.Search(context.Background(), "NEW_FEATURE", opts)
@@ -134,14 +134,14 @@ func TestLocalDiffAddFrontend(t *testing.T) {
 }
 
 func TestEngineExecutionStrategies(t *testing.T) {
-	b1 := &mockFrontend{name: "b1", results: []models.IntermediateResult{{File: "f1", RawFragment: "c1"}}}
-	b2 := &mockFrontend{name: "b2", results: []models.IntermediateResult{{File: "f2", RawFragment: "c2"}}}
+	b1 := &mockBackend{name: "b1", results: []models.IntermediateResult{{File: "f1", RawFragment: "c1"}}}
+	b2 := &mockBackend{name: "b2", results: []models.IntermediateResult{{File: "f2", RawFragment: "c2"}}}
 
 	t.Run("Parallel Mode", func(t *testing.T) {
 		var buf bytes.Buffer
-		backends := []EngineFrontend{
-			{Frontend: b1, Resolver: &resolver.NaiveResolver{}, Limit: 10},
-			{Frontend: b2, Resolver: &resolver.NaiveResolver{}, Limit: 10},
+		backends := []EngineBackend{
+			{Backend: b1, Resolver: &resolver.NaiveResolver{}, Limit: 10},
+			{Backend: b2, Resolver: &resolver.NaiveResolver{}, Limit: 10},
 		}
 		eng := New(backends, &buf, &buf, "parallel")
 		eng.Run(context.Background(), "q", models.SearchOptions{})
@@ -152,9 +152,9 @@ func TestEngineExecutionStrategies(t *testing.T) {
 
 	t.Run("Sequential Mode", func(t *testing.T) {
 		var buf bytes.Buffer
-		backends := []EngineFrontend{
-			{Frontend: b1, Resolver: &resolver.NaiveResolver{}, Limit: 10},
-			{Frontend: b2, Resolver: &resolver.NaiveResolver{}, Limit: 10},
+		backends := []EngineBackend{
+			{Backend: b1, Resolver: &resolver.NaiveResolver{}, Limit: 10},
+			{Backend: b2, Resolver: &resolver.NaiveResolver{}, Limit: 10},
 		}
 		eng := New(backends, &buf, &buf, "sequential")
 		eng.Run(context.Background(), "q", models.SearchOptions{})

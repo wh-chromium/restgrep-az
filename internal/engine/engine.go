@@ -6,32 +6,32 @@ import (
 	"io"
 	"sort"
 
-	"github.com/wh-chromium/restgrep-az/internal/frontend"
+	"github.com/wh-chromium/restgrep-az/internal/backend"
 	"github.com/wh-chromium/restgrep-az/internal/models"
 	"github.com/wh-chromium/restgrep-az/internal/resolver"
 )
 
-type EngineFrontend struct {
-	Frontend frontend.Frontend
+type EngineBackend struct {
+	Backend  backend.Backend
 	Resolver resolver.Resolver
 	Limit    int
 }
 
 type Engine struct {
-	frontends     []EngineFrontend
+	backends      []EngineBackend
 	out           io.Writer
 	errOut        io.Writer
 	executionMode string // "parallel" or "sequential"
 }
 
-func New(frontends []EngineFrontend, out io.Writer, errOut io.Writer, mode string) *Engine {
+func New(backends []EngineBackend, out io.Writer, errOut io.Writer, mode string) *Engine {
 	if mode == "" {
 		mode = "parallel"
 	}
-	return &Engine{frontends: frontends, out: out, errOut: errOut, executionMode: mode}
+	return &Engine{backends: backends, out: out, errOut: errOut, executionMode: mode}
 }
 
-type frontendResultGroup struct {
+type backendResultGroup struct {
 	name     string
 	results  []models.IntermediateResult
 	resolver resolver.Resolver
@@ -40,58 +40,58 @@ type frontendResultGroup struct {
 }
 
 func (e *Engine) Run(ctx context.Context, query string, opts models.SearchOptions) error {
-	var groups []frontendResultGroup
+	var groups []backendResultGroup
 
 	if e.executionMode == "sequential" {
-		for _, ef := range e.frontends {
-			f := ef.Frontend
+		for _, eb := range e.backends {
+			b := eb.Backend
 			currentOpts := opts
 			if currentOpts.Limit <= 0 {
-				currentOpts.Limit = ef.Limit
+				currentOpts.Limit = eb.Limit
 				if currentOpts.Limit <= 0 {
 					currentOpts.Limit = 100
 				}
 			}
 
-			results, err := f.Search(ctx, query, currentOpts)
+			results, err := b.Search(ctx, query, currentOpts)
 			if err == nil {
 				if len(results) > currentOpts.Limit {
 					results = results[:currentOpts.Limit]
 				}
-				groups = append(groups, frontendResultGroup{
-					name:     f.Name(),
+				groups = append(groups, backendResultGroup{
+					name:     b.Name(),
 					results:  results,
-					resolver: ef.Resolver,
+					resolver: eb.Resolver,
 					limit:    currentOpts.Limit,
 				})
 				break
 			}
-			fmt.Fprintf(e.errOut, "[%s] Error: %v\n", f.Name(), err)
+			fmt.Fprintf(e.errOut, "[%s] Error: %v\n", b.Name(), err)
 		}
 	} else {
 		// Parallel mode
 		resultsChan := make(chan struct {
 			index int
-			group frontendResultGroup
-		}, len(e.frontends))
+			group backendResultGroup
+		}, len(e.backends))
 
-		for i, ef := range e.frontends {
-			go func(idx int, ef EngineFrontend) {
-				f := ef.Frontend
+		for i, eb := range e.backends {
+			go func(idx int, eb EngineBackend) {
+				b := eb.Backend
 				currentOpts := opts
 				if currentOpts.Limit <= 0 {
-					currentOpts.Limit = ef.Limit
+					currentOpts.Limit = eb.Limit
 					if currentOpts.Limit <= 0 {
 						currentOpts.Limit = 100
 					}
 				}
 
-				results, err := f.Search(ctx, query, currentOpts)
+				results, err := b.Search(ctx, query, currentOpts)
 				if err != nil {
 					resultsChan <- struct {
 						index int
-						group frontendResultGroup
-					}{idx, frontendResultGroup{name: f.Name(), err: err}}
+						group backendResultGroup
+					}{idx, backendResultGroup{name: b.Name(), err: err}}
 					return
 				}
 
@@ -100,18 +100,18 @@ func (e *Engine) Run(ctx context.Context, query string, opts models.SearchOption
 				}
 				resultsChan <- struct {
 					index int
-					group frontendResultGroup
-				}{idx, frontendResultGroup{
-					name:     f.Name(),
+					group backendResultGroup
+				}{idx, backendResultGroup{
+					name:     b.Name(),
 					results:  results,
-					resolver: ef.Resolver,
+					resolver: eb.Resolver,
 					limit:    currentOpts.Limit,
 				}}
-			}(i, ef)
+			}(i, eb)
 		}
 
-		tempGroups := make([]frontendResultGroup, len(e.frontends))
-		for i := 0; i < len(e.frontends); i++ {
+		tempGroups := make([]backendResultGroup, len(e.backends))
+		for i := 0; i < len(e.backends); i++ {
 			res := <-resultsChan
 			tempGroups[res.index] = res.group
 			if res.group.err != nil {
@@ -128,27 +128,27 @@ func (e *Engine) Run(ctx context.Context, query string, opts models.SearchOption
 
 	// 2. Map and Flatten for efficient resolution
 	type resultPtr struct {
-		ir           *models.IntermediateResult
-		resolver     resolver.Resolver
-		frontendName string
-		groupIndex   int
-		resultIndex  int
+		ir          *models.IntermediateResult
+		resolver    resolver.Resolver
+		backendName string
+		groupIndex  int
+		resultIndex int
 	}
 
 	var allPtrs []resultPtr
 	for gIdx, g := range groups {
 		for rIdx := range g.results {
 			allPtrs = append(allPtrs, resultPtr{
-				ir:           &g.results[rIdx],
-				resolver:     g.resolver,
-				frontendName: g.name,
-				groupIndex:   gIdx,
-				resultIndex:  rIdx,
+				ir:          &g.results[rIdx],
+				resolver:    g.resolver,
+				backendName: g.name,
+				groupIndex:  gIdx,
+				resultIndex: rIdx,
 			})
 		}
 	}
 
-	// Sort by filename for MRU efficiency if needed (though we call resolvers one by one now)
+	// Sort by filename for MRU efficiency
 	sort.Slice(allPtrs, func(i, j int) bool {
 		if allPtrs[i].ir.File != allPtrs[j].ir.File {
 			return allPtrs[i].ir.File < allPtrs[j].ir.File

@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/wh-chromium/restgrep-az/internal/backend/azure"
+	"github.com/wh-chromium/restgrep-az/internal/backend/github"
+	"github.com/wh-chromium/restgrep-az/internal/backend/githubapi"
+	"github.com/wh-chromium/restgrep-az/internal/backend/localdiff"
 	"github.com/wh-chromium/restgrep-az/internal/config"
 	"github.com/wh-chromium/restgrep-az/internal/engine"
-	"github.com/wh-chromium/restgrep-az/internal/frontend/azure"
-	"github.com/wh-chromium/restgrep-az/internal/frontend/github"
-	"github.com/wh-chromium/restgrep-az/internal/frontend/githubapi"
-	"github.com/wh-chromium/restgrep-az/internal/frontend/localdiff"
 	"github.com/wh-chromium/restgrep-az/internal/models"
 	"github.com/wh-chromium/restgrep-az/internal/resolver"
 )
@@ -66,31 +66,31 @@ func main() {
 	opts.Paths = args[1:]
 	opts.MergeBaseBranch = cfg.MergeBaseBranch
 
-	// 3. Instantiate Frontends and Resolvers
-	var eFrontends []engine.EngineFrontend
+	// 3. Instantiate Backends and Resolvers
+	var eBackends []engine.EngineBackend
 	for _, bCfg := range cfg.Backends {
 		limit := bCfg.Limit
 		if limit <= 0 { limit = 100 }
 
-		var f engine.EngineFrontend
+		var f engine.EngineBackend
 		f.Limit = limit
 
-		// Frontend type
+		// Backend type
 		switch bCfg.Type {
 		case "azure":
-			f.Frontend = azure.New(bCfg.Organization, bCfg.Project)
+			f.Backend = azure.New(bCfg.Organization, bCfg.Project)
 		case "github":
 			githubBackend := github.New(bCfg.Repo)
 			githubBackend.Executor = &github.RealExecutor{}
-			f.Frontend = githubBackend
+			f.Backend = githubBackend
 		case "github-api":
 			githubAPIBackend := githubapi.New(bCfg.Repo)
 			githubAPIBackend.Executor = &githubapi.RealExecutor{}
-			f.Frontend = githubAPIBackend
+			f.Backend = githubAPIBackend
 		case "local-diff-add":
-			f.Frontend = localdiff.New(bCfg.MergeBaseBranch)
+			f.Backend = localdiff.New(bCfg.MergeBaseBranch)
 		default:
-			fmt.Fprintf(os.Stderr, "Unknown frontend type: %s\n", bCfg.Type)
+			fmt.Fprintf(os.Stderr, "Unknown backend type: %s\n", bCfg.Type)
 			continue
 		}
 
@@ -119,10 +119,10 @@ func main() {
 			f.Resolver = &resolver.LocalResolver{}
 		}
 
-		eFrontends = append(eFrontends, f)
+		eBackends = append(eBackends, f)
 	}
 
-	eng := engine.New(eFrontends, os.Stdout, os.Stderr, cfg.ExecutionMode)
+	eng := engine.New(eBackends, os.Stdout, os.Stderr, cfg.ExecutionMode)
 	if err := eng.Run(context.Background(), query, opts); err != nil {
 		fmt.Fprintf(os.Stderr, "Search failed: %v\n", err)
 		os.Exit(1)
