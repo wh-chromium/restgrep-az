@@ -42,24 +42,43 @@ func (b *Backend) Search(ctx context.Context, query string, opts models.SearchOp
 	if err != nil {
 		return nil, fmt.Errorf("failed to get HEAD: %w", err)
 	}
-	headCommit, _ := repo.CommitObject(head.Hash())
+	headCommit, err := repo.CommitObject(head.Hash())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get HEAD commit: %w", err)
+	}
 
 	// 2. Get Target Branch
 	ref, err := repo.Reference(plumbing.ReferenceName("refs/remotes/"+branch), true)
 	if err != nil {
-		ref, _ = repo.Reference(plumbing.ReferenceName("refs/heads/"+branch), true)
+		var err2 error
+		ref, err2 = repo.Reference(plumbing.ReferenceName("refs/heads/"+branch), true)
+		if err2 != nil {
+			return nil, fmt.Errorf("branch %s not found (remote: %v, local: %v)", branch, err, err2)
+		}
 	}
 	if ref == nil {
 		return nil, fmt.Errorf("branch %s not found", branch)
 	}
-	targetCommit, _ := repo.CommitObject(ref.Hash())
+	targetCommit, err := repo.CommitObject(ref.Hash())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get target branch commit: %w", err)
+	}
 
 	// 3. Find Merge Base
+	if headCommit == nil {
+		return nil, fmt.Errorf("HEAD commit is nil")
+	}
+	if targetCommit == nil {
+		return nil, fmt.Errorf("target commit is nil")
+	}
 	bases, err := headCommit.MergeBase(targetCommit)
 	if err != nil || len(bases) == 0 {
-		return nil, fmt.Errorf("failed to find merge base between HEAD and %s", branch)
+		return nil, fmt.Errorf("failed to find merge base between HEAD and %s: %w", branch, err)
 	}
 	mergeBase := bases[0]
+	if mergeBase == nil {
+		return nil, fmt.Errorf("merge base commit is nil")
+	}
 
 	if opts.Debug {
 		fmt.Printf("[DEBUG][local-diff-add] Merge base: %s\n", mergeBase.Hash)
@@ -68,8 +87,20 @@ func (b *Backend) Search(ctx context.Context, query string, opts models.SearchOp
 	// 4. Get Diff between Merge Base and Current HEAD (or worktree?)
 	// Let's compare mergeBase tree vs HEAD tree for simplicity first, 
 	// then maybe worktree.
-	baseTree, _ := mergeBase.Tree()
-	headTree, _ := headCommit.Tree()
+	baseTree, err := mergeBase.Tree()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get merge base tree: %w", err)
+	}
+	headTree, err := headCommit.Tree()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get HEAD tree: %w", err)
+	}
+	if baseTree == nil {
+		return nil, fmt.Errorf("base tree is nil")
+	}
+	if headTree == nil {
+		return nil, fmt.Errorf("head tree is nil")
+	}
 	
 	patch, err := baseTree.Patch(headTree)
 	if err != nil {
