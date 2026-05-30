@@ -7,8 +7,7 @@
 - **Frontend**: A remote service client (e.g., Azure DevOps, GitHub, Local Diff).
 - **Resolver**: The logic that finalizes an intermediate match (e.g., Naive or Local resolution).
 - **Engine**: The core orchestrator that manages parallel/sequential execution, result merging, and local file enrichment.
-- **Double-Sort Strategy**: To maximize cache efficiency, the engine sorts all collected results by **filename** to perform O(files) local resolution, then re-sorts them to match the **original provider order** for the user.
-- **MRU Cache**: A single-file memory cache ensures each unique file is read and hashed only once per search.
+- **Double-Sort Strategy**: The engine sorts all collected results by **filename** to perform efficient sequential local resolution, then re-sorts them to match the **original provider order** for the user.
 
 ## Settings Configuration (`restgrep.json`)
 

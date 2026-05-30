@@ -9,7 +9,7 @@ A token-efficient normalization layer for remote code search APIs (Azure DevOps 
 - **Context Control**: Supports `-A`, `-B`, and `-C` using local resolution.
 - **Dynamic Execution**: Choose between `parallel` (simultaneous) or `sequential` (fallback) search modes.
 - **Relaxed Local Resolution**: Automatically resolves remote match stubs to actual source lines, with a robust fallback search if file versions have drifted.
-- **High Performance**: Uses a Single-File MRU cache and global filename sorting to ensure each local file is read/hashed exactly once.
+- **High Performance**: Uses global filename sorting to optimize sequential access and improve file-system read performance.
 
 ## Installation & Building
 

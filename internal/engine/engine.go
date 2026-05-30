@@ -148,7 +148,7 @@ func (e *Engine) Run(ctx context.Context, query string, opts models.SearchOption
 		}
 	}
 
-	// Sort by filename for MRU efficiency
+	// Sort by filename for sequential read optimization
 	sort.Slice(allPtrs, func(i, j int) bool {
 		if allPtrs[i].ir.File != allPtrs[j].ir.File {
 			return allPtrs[i].ir.File < allPtrs[j].ir.File

@@ -23,11 +23,11 @@ To add a new backend, follow these steps:
 
 ## Engine Architecture: Double-Sort
 
-The `restgrep` engine uses a sophisticated two-pass sorting strategy to balance user experience with extreme performance:
+The `restgrep` engine uses a two-pass sorting strategy to optimize local file accesses:
 
 1.  **Phase 1 (Aggregation)**: Results are collected from backends (parallel or sequential).
-2.  **Phase 2 (Sorting for Cache)**: Results are mapped to pointers and sorted globally by **File Path**.
-3.  **Phase 3 (Enrichment)**: The **Single-File MRU Cache** processes the sorted pointers. Because they are grouped by file, `restgrep` achieve **100% cache efficiency**—each file is opened and hashed exactly once.
+2.  **Phase 2 (Sorting for Efficiency)**: Results are mapped to pointers and sorted globally by **File Path**.
+3.  **Phase 3 (Enrichment)**: The enrichment process resolves matches. Grouping by file ensures sequential access pattern.
 4.  **Phase 4 (Sorting for User)**: Enriched results are re-sorted back to their **original provider order** before being printed.
 
 ## Flag Mapping Guidelines
@@ -36,13 +36,4 @@ The `restgrep` engine uses a sophisticated two-pass sorting strategy to balance 
 - **WordRegexp (`-w`)**: Map to native exact-match features (e.g., `"quotes"` for GitHub).
 - **Paths**: Handle multiple positional arguments by executing iterative queries if the remote API does not support `OR` logic for paths.
 
-## Contract Verification
 
-Always use the `VerifyBackendContract` utility in `internal/backend/testing.go` to ensure your new backend adheres to standard `grep` semantics.
-
-```go
-func TestMyBackend(t *testing.T) {
-    b := NewMyBackend(...)
-    backend.VerifyBackendContract(t, b, cases)
-}
-```

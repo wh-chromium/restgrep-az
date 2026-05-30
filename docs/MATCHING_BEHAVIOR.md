@@ -47,7 +47,7 @@ It is important to note that `restgrep` backends primarily support **Glob-style 
 `restgrep` automatically **merges and sorts all results by filename** before performing local file enrichment.
 
 - **Standard `grep` Parity**: Grouping matches by file is the standard behavior for code search tools.
-- **Cache Optimization**: By sorting by filename, the Single-File MRU cache achieves **100% efficiency**. `restgrep` will open, read, and hash each unique file in your result set **exactly once**, regardless of how many matches are found in that file or how many backends returned it.
+- **Performance Optimization**: By sorting by filename, sequential file reads are grouped together, improving file-system caching behavior and ensuring clean consecutive processing for each unique file in your result set.
 
 ## 6. Summary Table
 
